@@ -1,0 +1,3044 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentFlow: развёрнутый процесс разработки</title>
+
+<!-- region: tokens -->
+<style>
+  :root {
+    color-scheme: light;
+
+    --bg: #f4eee2;
+    --surface: #fbf7ee;
+    --sel: #efe5d0;
+    --text: #231f18;
+    --muted: #5e5747;
+    --hair: #d8ceb8;
+    --line: #7a705c;
+    --accent: #d9480f;
+
+    --agent-user: #9c3d54;
+    --agent-disp: #3f4f9a;
+    --agent-post: #7a4fa0;
+    --agent-coder: #2f7d4f;
+    --agent-rev: #a8730f;
+    --agent-script: #2b7a86;
+
+    --shadow-soft: 0 1px 2px rgb(35 31 24 / 0.06), 0 6px 20px rgb(35 31 24 / 0.10);
+    --shadow-lift: 0 2px 4px rgb(35 31 24 / 0.10), 0 10px 24px rgb(35 31 24 / 0.14);
+    --glow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+    --lane-col: 168px;
+    --lane-tint: 7%;
+    --dur-hover: 160ms;
+    --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+    --accent-line: 3px;
+
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    --fs-12: 12px;
+    --fs-14: 14px;
+    --fs-16: 16px;
+    --fs-20: 20px;
+    --fs-32: 32px;
+    --lh-text: 1.5;
+    --lh-head: 1.15;
+
+    --sp-4: 4px;
+    --sp-8: 8px;
+    --sp-12: 12px;
+    --sp-16: 16px;
+    --sp-24: 24px;
+    --sp-64: 64px;
+
+    --r-node: 8px;
+    --r-panel: 14px;
+  }
+
+  [data-lane="user"] { --agent: var(--agent-user); }
+  [data-lane="disp"] { --agent: var(--agent-disp); }
+  [data-lane="post"] { --agent: var(--agent-post); }
+  [data-lane="coder"] { --agent: var(--agent-coder); }
+  [data-lane="rev"] { --agent: var(--agent-rev); }
+  [data-lane="script"] { --agent: var(--agent-script); }
+  [data-lane] { --glow: 0 0 0 3px color-mix(in srgb, var(--agent) 35%, transparent); }
+</style>
+<!-- end region -->
+
+<!-- region: shell -->
+<style>
+  html, body { color: var(--text); }
+  html { background: var(--bg); }
+  /* Тёплая бумага: мягкий свет сверху поверх фона из токенов, без узора и сети. */
+  body {
+    margin: 0;
+    background-image: radial-gradient(ellipse 90% 55% at 50% 0, var(--surface), transparent 75%);
+    background-repeat: no-repeat;
+    font-family: var(--font-sans);
+    font-size: var(--fs-16);
+    line-height: var(--lh-text);
+  }
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: var(--sp-24) var(--sp-16) var(--sp-64);
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-24);
+  }
+  .graph-wrap { min-width: 0; }
+  .panel {
+    min-width: 0;
+    min-height: 200px;
+    padding: var(--sp-24);
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-panel);
+  }
+  .panel-title {
+    margin: 0 0 var(--sp-16);
+    font-size: var(--fs-20);
+    line-height: var(--lh-head);
+    font-weight: 600;
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--sp-8) var(--sp-16);
+    margin: 0;
+    padding: var(--sp-12);
+    border-radius: var(--r-panel);
+    box-shadow: var(--shadow-soft);
+  }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .step-block { display: grid; gap: var(--sp-12); margin: 0; overflow-wrap: anywhere; }
+  .step-line { margin: 0; }
+  .step-k { display: block; color: var(--muted); font-size: var(--fs-14); }
+  .panel-empty { margin: 0; color: var(--muted); }
+</style>
+<!-- end region -->
+
+<!-- region: head -->
+<style>
+  /* Заголовок крупнее прежних 32 px: от 36 px на узком экране до 44 px на широком. Размер только в этой области. */
+  .head h1 {
+    margin: 0 0 var(--sp-8);
+    font-size: clamp(36px, 6vw, 44px);
+    line-height: var(--lh-head);
+    font-weight: 600;
+    text-wrap: balance;
+    overflow-wrap: break-word;
+  }
+  /* Тёплая акцентная линия под заголовком: толщина --accent-line, цвет --accent. */
+  .head h1::after {
+    content: "";
+    display: block;
+    width: 56px;
+    height: var(--accent-line);
+    margin-top: var(--sp-12);
+    background: var(--accent);
+  }
+  .lede {
+    margin: 0 0 var(--sp-16);
+    color: var(--muted);
+    font-size: var(--fs-16);
+  }
+</style>
+<!-- end region -->
+
+<!-- region: lanes-style -->
+<style>
+  /* Рамка графа: скруглена радиусом панели, мягкая тень. Скролл-контейнер обрезает содержимое по скруглению. */
+  .flow-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-panel);
+    box-shadow: var(--shadow-soft);
+    background: var(--bg);
+    /* Фокус и прокрутка не должны прятать узел под закреплённую колонку дорожек (--lane-col, плюс запас 8 px). */
+    scroll-padding-left: calc(var(--lane-col) + 8px);
+  }
+  /* Тёплая подкладка дорожки: доля цвета агента (--lane-tint) в смеси с поверхностью. Цвет агента берётся из --agent. */
+  .lane-band {
+    fill: color-mix(in srgb, var(--agent) var(--lane-tint), var(--surface));
+    pointer-events: none;
+  }
+  .flow {
+    display: flex;
+    width: max-content;
+  }
+  /* Колонка дорожек: закреплена слева, при горизонтальной прокрутке стоит на месте. Строки собираются из FLOW.lanes. */
+  .lane-column {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: var(--lane-col);
+    background: var(--bg);
+    border-right: 1px solid var(--hair);
+  }
+  .lane-agent {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-8);
+    min-width: 0;
+    padding: var(--sp-8);
+    border-bottom: 1px solid var(--hair);
+    /* Та же подкладка, что у полосы графа: непрозрачная смесь, колонка остаётся закреплённой поверх прокрутки. */
+    background: color-mix(in srgb, var(--agent) var(--lane-tint), var(--surface));
+  }
+  .lane-mark {
+    flex: none;
+    display: block;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    transition: transform 240ms ease, box-shadow 240ms ease;
+  }
+  .lane-mark .agent-mark { display: block; width: 48px; height: 48px; }
+  .lane-text {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .lane-name {
+    font-size: var(--fs-14);
+    font-weight: 600;
+    line-height: var(--lh-text);
+    overflow-wrap: break-word;
+    hyphens: auto;
+  }
+  /* Реплика живого агента: одна строка, обрезается многоточием, колонку не расширяет. */
+  .lane-say {
+    display: none;
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--fs-12);
+    line-height: var(--lh-text);
+    color: var(--muted);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  /* Дыхание только у кольца в покое. Период 4.4 с, фаза задаётся из индекса дорожки (--phase, в JS). */
+  .lane-agent .agent-ring { transform-box: fill-box; transform-origin: center; }
+  .lane-agent:not(.is-alive) .agent-ring {
+    animation: lanes-breathe 4.4s ease-in-out infinite;
+    animation-delay: var(--phase, 0s);
+  }
+  @keyframes lanes-breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.03); }
+  }
+  /* Живой агент: свечение и увеличение на подложке, поворот знака, толстое кольцо, реплика.
+     Толщина кольца перебивает inline-stroke-width из agentMark. */
+  .lane-agent .agent-glyph {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: transform 240ms ease;
+  }
+  .lane-agent.is-alive .lane-mark {
+    transform: scale(1.08);
+    box-shadow: var(--glow);
+  }
+  .lane-agent.is-alive .agent-ring { stroke-width: 2.6 !important; }
+  .lane-agent.is-alive .agent-glyph { transform: rotate(14deg); }
+  .lane-agent.is-alive .lane-say { display: block; }
+  /* Уменьшение движения: поворот и увеличение не идут; рамка, толщина, реплика и свечение остаются статично. */
+  @media (prefers-reduced-motion: reduce) {
+    .lane-agent.is-alive .lane-mark { transform: none; }
+    .lane-agent.is-alive .agent-glyph { transform: none; }
+  }
+  .lane-sep { stroke: var(--hair); stroke-width: 1; }
+</style>
+<!-- end region -->
+
+<!-- region: nodes-style -->
+<style>
+  .flow-svg {
+    display: block;
+    flex: none;
+    font-family: var(--font-sans);
+  }
+  .node-g { cursor: pointer; }
+  /* Форма узла нейтральна (базовый .node без цвета агента: им пользуется и легенда). Цвет агента в узле - кайма, задаётся от data-lane. */
+  .node {
+    fill: var(--surface);
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .node-g .node {
+    stroke: var(--agent);
+    stroke-width: 1.5;
+  }
+  .node-ring {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1;
+    opacity: 0;
+  }
+  .node-g .node-ring { stroke: var(--agent); }
+  /* Невидимая зона попадания: первый ребёнок группы, не сдвигается. Заливка прозрачная, но участвует в проверке попадания. */
+  .node-hit { fill: transparent; stroke: none; }
+  /* Узел в покое: мягкая тень --shadow-soft. SVG принимает filter, а не box-shadow, поэтому тень записана как drop-shadow с теми же числами токена.
+     Свечение выбранного шага ниже её перекрывает по специфичности. Переходы по --dur-hover и --ease-out; при «уменьшить движение» их гасит общее правило a11y. */
+  .node-g .node {
+    filter: drop-shadow(0 1px 2px rgb(35 31 24 / 0.06)) drop-shadow(0 6px 20px rgb(35 31 24 / 0.10));
+    transition: fill var(--dur-hover) var(--ease-out), stroke var(--dur-hover) var(--ease-out), stroke-width var(--dur-hover) var(--ease-out), filter var(--dur-hover) var(--ease-out);
+  }
+  /* Отклик на фокус клавиатурой и наведение мышью: узел приподнимается на 2 px и получает тень --shadow-lift (те же числа, что в токене, для SVG).
+     Приподнимание только при движении не уменьшено; кольцо фокуса остаётся в группе узла и сдвигается вместе с ним (поля холста 14 px, не обрезается). */
+  @media (prefers-reduced-motion: no-preference) {
+    .node-g > :not(.node-hit) { transition: transform var(--dur-hover) var(--ease-out); }
+    .node-g:focus-visible > :not(.node-hit) { transform: translateY(-2px); }
+    .node-g:focus-visible .node { filter: drop-shadow(0 2px 4px rgb(35 31 24 / 0.10)) drop-shadow(0 10px 24px rgb(35 31 24 / 0.14)); }
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .node-g:hover > :not(.node-hit) { transform: translateY(-2px); }
+    .node-g:hover .node { filter: drop-shadow(0 2px 4px rgb(35 31 24 / 0.10)) drop-shadow(0 10px 24px rgb(35 31 24 / 0.14)); }
+  }
+  /* След пройденного шага: тонкая линия снаружи кайма. Видна и у выбранного пройденного шага, так что младшее состояние не пропадает. */
+  .passed-ring {
+    fill: none;
+    stroke: var(--agent);
+    stroke-width: 1.2;
+    opacity: 0;
+  }
+  .node-g.is-passed .passed-ring { opacity: 1; }
+  .node-name {
+    fill: var(--text);
+    font-size: var(--fs-14);
+    font-weight: 600;
+  }
+  .node-place {
+    fill: var(--muted);
+    font-size: var(--fs-12);
+  }
+  /* Пройденный сценарием шаг: толще кайма и лёгкая заливка цветом своего агента. Без свечения.
+     Не трогает is-received (стиль задаёт задача 04) и выбранный шаг (его рамка старше). */
+  .node-g.is-passed:not(.is-selected):not(.is-received) .node {
+    fill: color-mix(in srgb, var(--agent) 9%, var(--surface));
+    stroke: var(--agent);
+    stroke-width: 3;
+  }
+  /* Выбранный шаг: самая толстая кайма и мягкое свечение цвета своего агента. Свечение только у него.
+     Специфичность выше обычного узла и пройденного, чтобы более поздние правила состояний не перебивали выбор. */
+  .flow .node-g.is-selected .node {
+    fill: var(--sel);
+    stroke-width: 4.5;
+    /* Свечение только на рамке шага, не на подписи: текст остаётся на бумаге. */
+    filter: drop-shadow(0 0 6px color-mix(in srgb, var(--agent) 55%, transparent));
+  }
+  .is-selected .node-ring { opacity: 1; }
+  .has-selection .node-g:not(.is-selected) .node-name { fill: var(--muted); }
+  .edge {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1.5;
+    transition: stroke var(--dur-hover) var(--ease-out), stroke-width var(--dur-hover) var(--ease-out), opacity var(--dur-hover) var(--ease-out);
+  }
+  .edge-head { fill: var(--line); transition: opacity var(--dur-hover) var(--ease-out); }
+  /* Подпись связи на подложке бумажной поверхности, чтобы читалась на линии. */
+  .edge-label-bg { fill: var(--surface); }
+  .edge-label {
+    fill: var(--muted);
+    font-size: var(--fs-12);
+    transition: fill var(--dur-hover) var(--ease-out), opacity var(--dur-hover) var(--ease-out);
+  }
+  .edge.is-back { stroke-dasharray: 6 4; }
+  .edge.is-side { stroke-width: 1; }
+  /* Пройденное плеером: толще контур и линия, не только цвет. */
+  .edge.is-passed { stroke: var(--text); stroke-width: 2.5; }
+  .edge.is-passed.is-side { stroke-width: 2; }
+  /* Исходящие стрелки шага (наведение, фокус или выбор). Правила идут последними: перекрывают назад, вне пути и пройденное. */
+  .edge-head-hi { fill: var(--accent); }
+  .flow.has-out .edge-head { opacity: 0.4; }
+  .flow.has-out .edge-g:not(.is-out) .edge { opacity: 0.4; }
+  .edge-g.is-out .edge {
+    stroke: var(--accent);
+    stroke-width: 3.5;
+    stroke-dasharray: 8 6;
+    animation: nodes-edge-run 0.6s linear infinite;
+  }
+  .edge-g.is-out .edge.is-side { stroke-width: 2.5; }
+  .edge-g.is-out .edge-label { fill: var(--text); }
+  /* Штрих сдвигается к концу линии, где стрелка. Период 14 = 8 + 6, цикл без скачка. Анимация только у подсвеченных; при «уменьшить движение» её гасит общее правило. */
+  @keyframes nodes-edge-run { to { stroke-dashoffset: -14; } }
+  /* Легенда «Обозначения»: закрытый по умолчанию details, одна строка в закрытом виде. Раскрывает её только браузер (мышь, Enter, Space). */
+  .legend {
+    display: block;
+    margin: 0 0 var(--sp-12);
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-node);
+    font-size: var(--fs-14);
+    color: var(--text);
+  }
+  .legend-summary {
+    cursor: pointer;
+    padding: var(--sp-8) var(--sp-12);
+    white-space: nowrap;
+  }
+  .legend-summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .legend-items {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-8) var(--sp-24);
+    padding: var(--sp-8) var(--sp-12);
+    border-top: 1px solid var(--hair);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-8);
+  }
+  .legend-sample {
+    flex: none;
+    overflow: visible;
+  }
+  /* Образцы форм в легенде: нейтральная бумага, без цвета агента. */
+  .legend-sample .node {
+    fill: var(--bg);
+    stroke: var(--muted);
+    stroke-width: 1.5;
+  }
+  .legend-sample .edge.is-back { stroke: var(--muted); }
+</style>
+<!-- end region -->
+
+<!-- region: panel-style -->
+<style>
+  .outcomes {
+    margin: 0;
+    padding-left: var(--sp-16);
+  }
+  .place-card {
+    margin-top: var(--sp-24);
+    padding-top: var(--sp-16);
+    border-top: 1px solid var(--hair);
+  }
+  .place-title {
+    margin: 0 0 var(--sp-12);
+    font-size: var(--fs-16);
+    font-weight: 600;
+    line-height: var(--lh-head);
+  }
+  .place-note { margin: 0; }
+  /* Карточка агента: крупный знак и роль, блок «Дальше», строки сценария. У панели только тень --shadow-soft, свечения нет. */
+  .panel { box-shadow: var(--shadow-soft); }
+  .agent-card-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-16);
+    margin: 0 0 var(--sp-16);
+    padding-left: var(--sp-12);
+    border-left: 4px solid var(--agent);
+  }
+  .agent-card-mark { flex: none; display: block; width: 64px; height: 64px; }
+  .agent-card-mark .agent-mark { display: block; width: 64px; height: 64px; }
+  .agent-card-role {
+    margin: 0;
+    font-size: var(--fs-16);
+    font-weight: 600;
+    line-height: var(--lh-head);
+    overflow-wrap: anywhere;
+  }
+  .agent-scenario { margin-top: var(--sp-16); }
+  .agent-next {
+    margin-top: var(--sp-16);
+    padding-top: var(--sp-16);
+    border-top: 1px solid var(--hair);
+  }
+  .agent-next-title {
+    margin: 0 0 var(--sp-12);
+    font-size: var(--fs-16);
+    font-weight: 600;
+    line-height: var(--lh-head);
+  }
+  .agent-next-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: var(--sp-12);
+  }
+  .agent-next-item { display: grid; gap: var(--sp-4); }
+  .agent-next-label { font-weight: 600; overflow-wrap: anywhere; }
+  .agent-next-to {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-8);
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+  .agent-next-to .agent-mark { flex: none; width: 24px; height: 24px; }
+  .agent-next-to-name { color: var(--text); }
+  .agent-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-12) var(--sp-16);
+    margin: var(--sp-16) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .agent-row-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-8);
+    color: var(--muted);
+    font-size: var(--fs-14);
+  }
+  .agent-row-item .agent-mark { flex: none; width: 40px; height: 40px; }
+  /* Панель: на узком экране в потоке под графом, всегда развёрнута, кнопок нет.
+     На широком плавает в правом нижнем углу поверх графа и сворачивается в кнопку «Панель». */
+  .float-hide,
+  .float-show { display: none; }
+  .float-btn {
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-node);
+    min-height: 32px;
+    padding: var(--sp-4) var(--sp-12);
+    cursor: pointer;
+    transition:
+      border-color var(--dur-hover) var(--ease-out),
+      box-shadow var(--dur-hover) var(--ease-out),
+      transform var(--dur-hover) var(--ease-out);
+  }
+  .float-btn:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-lift);
+    transform: translateY(-1px);
+  }
+  .float-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-color: var(--accent);
+    box-shadow: var(--shadow-lift);
+  }
+  @media (min-width: 760px) {
+    .float {
+      position: fixed;
+      right: var(--sp-16);
+      bottom: var(--sp-16);
+      z-index: 5;
+      display: flex;
+      flex-direction: column;
+      width: min(360px, calc(100vw - 2 * var(--sp-16)));
+      max-height: 60vh;
+    }
+    .float.is-collapsed { width: auto; max-height: none; }
+    /* Запас справа в прокрутке графа: без него конечный шаг не уходит левее панели. */
+    .graph-wrap .flow-scroll { padding-right: calc(min(360px, 100vw - 2 * var(--sp-16)) + var(--sp-16)); }
+    .float .panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .float-hide { display: block; align-self: flex-end; margin-bottom: var(--sp-8); }
+    .float-show { display: none; align-self: flex-end; }
+    .float.is-collapsed .float-hide { display: none; }
+    .float.is-collapsed .float-show { display: block; }
+    .float.is-collapsed .panel { display: none; }
+  }
+</style>
+<!-- end region -->
+
+<!-- region: player-style -->
+<style>
+  .player {
+    margin: 0 0 var(--sp-12);
+    padding: var(--sp-12) var(--sp-16);
+    font-size: var(--fs-14);
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: var(--r-panel);
+    box-shadow: var(--shadow-soft);
+  }
+  .player-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-8) var(--sp-16);
+    margin: 0 0 var(--sp-8);
+  }
+  .player-field {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-8);
+    min-width: 0;
+    max-width: 100%;
+    color: var(--muted);
+  }
+  .player-buttons { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
+  /* Отклик на наведение и фокус: переходы по --dur-hover и --ease-out; при «уменьшить движение» их гасит общее правило в области a11y. */
+  .player button, .player select {
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-node);
+    box-shadow: var(--shadow-soft);
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    min-height: 32px;
+    padding: var(--sp-4) var(--sp-12);
+    transition:
+      transform var(--dur-hover) var(--ease-out),
+      box-shadow var(--dur-hover) var(--ease-out),
+      border-color var(--dur-hover) var(--ease-out),
+      outline-color var(--dur-hover) var(--ease-out);
+  }
+  .player select { max-width: 100%; min-width: 0; }
+  .player button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-8);
+  }
+  /* Наведение: кнопка приподнимается и темнеет рамка. Недоступная кнопка не приподнимается. */
+  .player button:not(:disabled):hover,
+  .player select:hover { border-color: var(--muted); }
+  .player button:not(:disabled):hover,
+  .player button:not(:disabled):focus-visible { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+  /* Нажата: кнопка утоплена на 1 px, тень снята. Различается движением, не только цветом. */
+  .player button:not(:disabled):active { transform: translateY(1px); box-shadow: none; }
+  /* Недоступна: пунктирная рамка, без тени, курсор «нельзя». Различается формой рамки, не только цветом. */
+  .player button:disabled {
+    color: var(--muted);
+    border-color: var(--hair);
+    border-style: dashed;
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+  .player button:focus-visible,
+  .player select:focus-visible { outline-color: var(--accent); }
+  .player-ico { flex: none; width: 12px; height: 12px; fill: currentColor; }
+  /* Полоса хода: одно деление на шаг сценария. Текущее толще и цвета агента (data-lane на делении). */
+  .player-track {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    box-sizing: border-box;
+    height: 10px;
+    margin: 0 0 var(--sp-8);
+    padding: 0 var(--sp-4);
+    background: var(--sel);
+    border-radius: var(--r-node);
+    box-shadow: var(--shadow-soft);
+  }
+  .player-tick {
+    flex: 1 1 0;
+    min-width: 2px;
+    height: 4px;
+    border-radius: var(--r-node);
+    background: var(--hair);
+  }
+  .player-tick.is-done { background: var(--muted); }
+  .player-tick.is-current { height: 10px; background: var(--agent); }
+  .player-status { margin: 0; min-height: 1.5em; }
+  .player-note { margin: var(--sp-8) 0 0; color: var(--muted); }
+  /* Конверт: 24x16 px, цвет агента отправителя, свечение как --glow (ореол 3 px в том же цвете), слово возврата рядом. */
+  .flow-envelope { pointer-events: none; }
+  .flow-envelope .envelope-halo { fill: color-mix(in srgb, var(--agent) 35%, transparent); }
+  .flow-envelope .envelope-body { fill: var(--agent); }
+  .flow-envelope .envelope-flap { fill: none; stroke: var(--surface); stroke-width: 1.5; stroke-linejoin: round; }
+  .flow-envelope .envelope-tag-bg { fill: var(--surface); stroke: var(--agent); stroke-width: 1; }
+  .flow-envelope .envelope-tag-text {
+    fill: var(--text);
+    font-family: var(--font-sans);
+    font-size: var(--fs-12);
+    font-weight: 600;
+  }
+  /* Получатель: вспышка рамки цвета агента на ~700 мс. Рамка выбранного узла остаётся, вспышка поверх.
+     Селектор с .flow-svg старше правила «пройден» независимо от порядка правил. */
+  .flow-svg .node-g.is-received:not(.is-selected) .node { stroke: var(--agent); stroke-width: 2; }
+  .flow-svg .node-g.is-received .node-ring {
+    opacity: 1;
+    stroke: var(--agent);
+    stroke-width: 3;
+    animation: player-flash 700ms ease-out forwards;
+  }
+  @keyframes player-flash {
+    from { opacity: 1; stroke-width: 6; }
+    to { opacity: 0; stroke-width: 1; }
+  }
+  /* Узкий экран: граф сверху, управление плеером под ним. Разметка та же. */
+  @media (max-width: 759px) {
+    .graph-wrap { display: flex; flex-direction: column; }
+    .graph-wrap .flow-scroll { order: 0; }
+    .graph-wrap .player { order: 1; margin: var(--sp-12) 0 0; }
+  }
+</style>
+<!-- end region -->
+
+<!-- region: a11y -->
+<style>
+  .focus-ring {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    opacity: 0;
+  }
+  .node-g:focus { outline: none; }
+  .node-g:focus-visible .focus-ring { opacity: 1; }
+  .node-g:focus-visible .node { stroke: var(--accent); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+</style>
+<!-- end region -->
+
+<!-- region: ambient-style -->
+<style>
+  /* Тихий сигнал: одна точка без слова, не интерактивна, цвет агента-отправителя через var(--agent). */
+  .ambient-dot {
+    pointer-events: none;
+    fill: var(--agent);
+  }
+</style>
+<!-- end region -->
+
+</head>
+<body>
+
+<main class="page">
+  <!-- region: head -->
+  <header class="head">
+    <h1>Развёрнутый процесс разработки по потоку agentFlow</h1>
+    <p class="lede">Читайте слева направо: строка это агент, блок это шаг, подпись на стрелке это слово возврата, конверт это сообщение.</p>
+  </header>
+  <!-- end region -->
+
+  <div class="layout">
+    <section class="graph-wrap" aria-label="Граф процесса по дорожкам участников">
+      <!-- region: flow-player -->
+      <div class="player">
+        <div class="player-row">
+          <label class="player-field" for="scenario">
+            Сценарий
+            <select id="scenario"></select>
+          </label>
+        </div>
+        <div class="player-row">
+          <div class="player-buttons" role="group" aria-label="Управление проигрыванием">
+            <button type="button" id="btn-play"><svg class="player-ico" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2 1 L11 6 L2 11 Z"/></svg><span class="player-label">Играть</span></button>
+            <button type="button" id="btn-pause" disabled><svg class="player-ico" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="2" y="1" width="3" height="10"/><rect x="7" y="1" width="3" height="10"/></svg><span class="player-label">Пауза</span></button>
+            <button type="button" id="btn-back" disabled><svg class="player-ico" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M10 1 L10 11 L1 6 Z"/><rect x="0" y="1" width="2" height="10"/></svg><span class="player-label">Назад</span></button>
+            <button type="button" id="btn-step"><svg class="player-ico" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2 1 L9 6 L2 11 Z"/><rect x="9.5" y="1" width="2" height="10"/></svg><span class="player-label">Шаг</span></button>
+            <button type="button" id="btn-reset"><svg class="player-ico" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="1" y="1" width="2" height="10"/><path d="M11 1 L11 11 L4 6 Z"/></svg><span class="player-label">Сначала</span></button>
+          </div>
+        </div>
+        <div class="player-track" id="player-track" aria-hidden="true"></div>
+        <p class="player-status" id="player-status" aria-live="polite"></p>
+        <p class="player-note" id="player-note" hidden>Анимация отключена настройкой «уменьшить движение»: переходы по кнопкам «Шаг» и «Назад».</p>
+      </div>
+      <!-- end region -->
+      <div class="flow-scroll">
+        <div id="flow" class="flow"></div>
+      </div>
+    </section>
+
+    <!-- region: float -->
+    <div id="float" class="float">
+      <button type="button" id="btn-hide" class="float-btn float-hide" aria-expanded="true" aria-controls="panel">Свернуть</button>
+      <section id="panel" class="panel" aria-live="polite"></section>
+      <button type="button" id="btn-show" class="float-btn float-show" aria-expanded="true" aria-controls="panel">Панель</button>
+    </div>
+    <!-- end region -->
+  </div>
+</main>
+
+<!-- region: flow-data -->
+<script>
+/*FLOW_DATA_BEGIN*/
+const FLOW = {
+  "lanes": [
+    {
+      "id": "user",
+      "name": "Пользователь"
+    },
+    {
+      "id": "disp",
+      "name": "Диспетчер"
+    },
+    {
+      "id": "post",
+      "name": "Постановщик"
+    },
+    {
+      "id": "coder",
+      "name": "Кодер"
+    },
+    {
+      "id": "rev",
+      "name": "Ревьювер"
+    },
+    {
+      "id": "script",
+      "name": "Скрипт worktree.sh"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "gate",
+      "lane": "disp",
+      "col": 1,
+      "kind": "step",
+      "name": "Шлюз",
+      "place": "основная копия",
+      "does": "Диспетчер проверяет, что репозиторий готов: git, главная ветка, файлы навыков, форма вопросов, каталог журнала и игнор служебных каталогов. Пробелы называет одним сообщением. Пока шлюз не пройден, фича не стартует."
+    },
+    {
+      "id": "gate-ok",
+      "lane": "user",
+      "col": 2,
+      "kind": "decision",
+      "decider": "user",
+      "name": "Согласие на пробелы шлюза",
+      "place": "чат",
+      "does": "Решается, закрывать ли пробелы действиями из сообщения шлюза. Показывается только если пробелы есть. Отказ фичу не стартует."
+    },
+    {
+      "id": "ask",
+      "lane": "post",
+      "col": 3,
+      "kind": "step",
+      "name": "Раунд вопросов",
+      "place": "основная копия",
+      "does": "Постановщик готовит раунд grill-me по открытым развилкам и возвращает слово «вопросы» с текстом раунда. Сам раунд ничего не записывает."
+    },
+    {
+      "id": "form",
+      "lane": "disp",
+      "col": 4,
+      "kind": "step",
+      "name": "Форма grill-me",
+      "place": "чат",
+      "does": "Диспетчер показывает раунд пользователю интерактивной формой. Рекомендуемый ответ стоит первым."
+    },
+    {
+      "id": "answer",
+      "lane": "user",
+      "col": 5,
+      "kind": "decision",
+      "decider": "user",
+      "name": "Ответ в форме",
+      "place": "чат",
+      "does": "Пользователь выбирает ответы. Диспетчер возвращает их тому же постановщику."
+    },
+    {
+      "id": "more",
+      "lane": "post",
+      "col": 6,
+      "kind": "decision",
+      "decider": "agent",
+      "name": "Остались ли развилки",
+      "place": "основная копия",
+      "does": "Пока развилка открыта, петля вопросов продолжается. Когда вопросов нет, постановщик пишет решение в спеку и нарезает. Если раунд шёл по развилке задачи, постановщик закрывает её."
+    },
+    {
+      "id": "slice",
+      "lane": "post",
+      "col": 7,
+      "kind": "step",
+      "name": "Решение в спеку и нарезка",
+      "place": "основная копия",
+      "does": "Постановщик пишет решение в спеку и режет её на файлы задач в каталоге .agentflow/.scratch основной копии. Возвращает слово «нарезка»."
+    },
+    {
+      "id": "slice-rev",
+      "lane": "rev",
+      "col": 8,
+      "kind": "step",
+      "name": "Проверка нарезки",
+      "place": "основная копия",
+      "does": "Ревьювер читает спеку и файлы задач, код не читает. Ищет открытые развилки, проверяет полноту полей и критериев."
+    },
+    {
+      "id": "slice-word",
+      "lane": "rev",
+      "col": 9,
+      "kind": "decision",
+      "decider": "agent",
+      "name": "Слово ревьювера по нарезке",
+      "place": "основная копия",
+      "does": "«готово» одобряет нарезку. «замечание» отдаёт доуточнение тому же постановщику, когда шаг worktree.sh remarks подтвердил запись под Comments спеки. «развилка» возвращает в раунд вопросов."
+    },
+    {
+      "id": "approve",
+      "lane": "script",
+      "col": 10,
+      "kind": "step",
+      "name": "worktree.sh approve",
+      "place": "основная копия",
+      "does": "Скрипт записывает одобрение нарезки: хеш каждого файла задачи. Одобрение переживает сессию и устаревает при правке задач."
+    },
+    {
+      "id": "list",
+      "lane": "post",
+      "col": 11,
+      "kind": "step",
+      "name": "Текст «список»",
+      "place": "основная копия",
+      "does": "Постановщик пишет текст нарезки для человека: что получим, список задач с «зачем» и «что сделаем», что идёт параллельно. Возвращает слово «список»."
+    },
+    {
+      "id": "approved",
+      "lane": "script",
+      "col": 12,
+      "kind": "decision",
+      "decider": "script",
+      "name": "worktree.sh approved",
+      "place": "основная копия",
+      "does": "Скрипт сверяет задачи с одобрением. «одобрена»: текст можно показывать. «не одобрена»: нарезку снова отдают ревьюверу."
+    },
+    {
+      "id": "show",
+      "lane": "disp",
+      "col": 13,
+      "kind": "step",
+      "name": "Текст нарезки в чате",
+      "place": "чат",
+      "does": "Диспетчер пишет текст как есть и ждёт согласия, без формы."
+    },
+    {
+      "id": "start-ok",
+      "lane": "user",
+      "col": 14,
+      "kind": "decision",
+      "decider": "user",
+      "name": "Согласие на старт",
+      "place": "чат",
+      "does": "Согласие в чате запускает незаблокированные задачи. Любой другой ответ возвращает постановщика перерезать."
+    },
+    {
+      "id": "launch",
+      "lane": "disp",
+      "col": 15,
+      "kind": "step",
+      "name": "Запуск задач",
+      "place": "основная копия",
+      "does": "Диспетчер запускает незаблокированные задачи со статусом ready-for-agent, не больше трёх одновременно, остальные ждут слот. Две задачи с пересекающимися областями одного файла параллельно не идут."
+    },
+    {
+      "id": "feature",
+      "lane": "script",
+      "col": 16,
+      "kind": "step",
+      "name": "worktree.sh feature",
+      "place": "ветка фичи",
+      "does": "Скрипт при первом запуске задачи фичи заводит ветку фичи от ветки, открытой при запуске потока, запоминает эту ветку старта и заводит worktree. Основную копию не переключает."
+    },
+    {
+      "id": "task",
+      "lane": "script",
+      "col": 17,
+      "kind": "step",
+      "name": "worktree.sh task",
+      "place": "worktree задачи",
+      "does": "Скрипт заводит ветку и worktree задачи от ветки фичи и ставит статус claimed. Без одобренной нарезки отказывает. Файл задачи в worktree не копируется: он живёт в основной копии, агент работает с ним по абсолютному пути."
+    },
+    {
+      "id": "code",
+      "lane": "coder",
+      "col": 18,
+      "kind": "step",
+      "name": "Работа над задачей",
+      "place": "worktree задачи",
+      "does": "Кодер читает файл задачи и пишет код и тесты в worktree. В дереве пишет один агент, остальные агенты задачи ждут. Возвращает «готово» или «развилка»."
+    },
+    {
+      "id": "code-word",
+      "lane": "coder",
+      "col": 19,
+      "kind": "decision",
+      "decider": "agent",
+      "name": "Слово кодера",
+      "place": "worktree задачи",
+      "does": "«готово» запускает шаг sync. «развилка» зовёт постановщика. Пока развилка открыта, продуктовый код не правится."
+    },
+    {
+      "id": "fork",
+      "lane": "post",
+      "col": 20,
+      "kind": "step",
+      "name": "Развилка задачи",
+      "place": "основная копия",
+      "does": "Постановщик добавляет к файлу задачи в основной копии суффикс _need_approve и ставит needs-info. Идёт новый раунд grill-me через диспетчера."
+    },
+    {
+      "id": "fork-end",
+      "lane": "post",
+      "col": 21,
+      "kind": "decision",
+      "decider": "agent",
+      "name": "Список задач изменился?",
+      "place": "основная копия",
+      "does": "Если нет: постановщик снимает _need_approve, ставит claimed, возвращает «закрыта», и тот же кодер продолжает. Если да: решение пишется в спеку, задачи нарезаются заново, возврат «нарезка»."
+    },
+    {
+      "id": "sync",
+      "lane": "script",
+      "col": 20,
+      "kind": "step",
+      "name": "worktree.sh sync",
+      "place": "worktree задачи",
+      "does": "Скрипт коммитит работу промежуточным коммитом и вливает кончик ветки фичи в ветку задачи."
+    },
+    {
+      "id": "sync-res",
+      "lane": "script",
+      "col": 21,
+      "kind": "decision",
+      "decider": "script",
+      "name": "Результат sync",
+      "place": "worktree задачи",
+      "does": "«готово»: дальше шаг check. «конфликт»: в дереве остались маркеры, их снимает тот же кодер."
+    },
+    {
+      "id": "fix-conflict",
+      "lane": "coder",
+      "col": 22,
+      "kind": "step",
+      "name": "Снять конфликт",
+      "place": "worktree задачи",
+      "does": "Тот же кодер снимает маркеры и возвращает «готово», затем снова идёт sync. Конфликт не развилка и не запускает grill-me."
+    },
+    {
+      "id": "check",
+      "lane": "script",
+      "col": 22,
+      "kind": "step",
+      "name": "worktree.sh check",
+      "place": "worktree задачи",
+      "does": "Скрипт запускает команду из поля «Проверка» файла задачи. Если там слово «нет», проверка пропускается."
+    },
+    {
+      "id": "check-res",
+      "lane": "script",
+      "col": 23,
+      "kind": "decision",
+      "decider": "script",
+      "name": "Результат check",
+      "place": "worktree задачи",
+      "does": "«зелёная» и «пропущено» идут к ревью. «красная»: скрипт записал замечание в файл задачи, тот же кодер получает слово «замечание». «нет команды»: постановщик заполняет поле «Проверка»."
+    },
+    {
+      "id": "fill-check",
+      "lane": "post",
+      "col": 24,
+      "kind": "step",
+      "name": "Заполнить поле «Проверка»",
+      "place": "основная копия",
+      "does": "Постановщик пишет в поле команду, которую назвал проект, или слово «нет». Затем check запускается снова. Кодера не возвращают."
+    },
+    {
+      "id": "review",
+      "lane": "rev",
+      "col": 24,
+      "kind": "step",
+      "name": "Ревью задачи",
+      "place": "worktree задачи",
+      "does": "Ревьювер читает diff относительно ветки фичи, файл задачи и раздел спеки, проверяет критерии. После «пропущено» проверяет критерии вручную и записывает, что проверил."
+    },
+    {
+      "id": "review-word",
+      "lane": "rev",
+      "col": 25,
+      "kind": "decision",
+      "decider": "agent",
+      "name": "Слово ревьювера",
+      "place": "worktree задачи",
+      "does": "«готово» запускает поставщика. «замечание» возвращает того же кодера, затем снова sync и check. «развилка» зовёт постановщика. После пятого «замечания» подряд цикл останавливает диспетчер."
+    },
+    {
+      "id": "fifth",
+      "lane": "user",
+      "col": 26,
+      "kind": "decision",
+      "decider": "user",
+      "name": "Продолжать цикл ревью?",
+      "place": "чат",
+      "does": "После пятого «замечания» подряд по задаче диспетчер спрашивает пользователя в чате, продолжать ли. «продолжить» возвращает кодера."
+    },
+    {
+      "id": "supply",
+      "lane": "script",
+      "col": 26,
+      "kind": "step",
+      "name": "worktree.sh supply",
+      "place": "ветка фичи",
+      "does": "Шаг поставщика: коммит в ветке задачи, слияние ветки задачи в ветку фичи, статус resolved в основной копии, снятие worktree и ветки задачи. У задачи с полем «Показ: да» скрипт печатает, где посмотреть результат, и диспетчер сразу пишет это пользователю."
+    },
+    {
+      "id": "supply-res",
+      "lane": "script",
+      "col": 27,
+      "kind": "decision",
+      "decider": "script",
+      "name": "Результат supply",
+      "place": "ветка фичи",
+      "does": "«готово»: цикл задачи закрыт, статус resolved. «конфликт»: слияние остановлено, статус не менялся, идёт sync и тот же кодер снимает конфликт."
+    },
+    {
+      "id": "resolved",
+      "lane": "disp",
+      "col": 28,
+      "kind": "step",
+      "name": "Задача resolved",
+      "place": "основная копия",
+      "does": "Блокировка с зависимых задач снята, диспетчер запускает освободившиеся. Когда resolved все задачи фичи, следующий шаг: итоговая проверка."
+    },
+    {
+      "id": "final",
+      "lane": "rev",
+      "col": 29,
+      "kind": "step",
+      "name": "Итоговая проверка",
+      "place": "worktree фичи",
+      "does": "Когда все задачи закрыты, ревьювер проверяет в worktree фичи то, что отдельная задача проверить не могла: совместную работу задач и критерии спеки. Проверки задач не повторяет. Отдельной задачи кодеру на это нет, а при одной задаче в фиче шага нет."
+    },
+    {
+      "id": "final-word",
+      "lane": "rev",
+      "col": 30,
+      "kind": "decision",
+      "decider": "agent",
+      "name": "Слово итоговой проверки",
+      "place": "worktree фичи",
+      "does": "«готово» ведёт к вопросу о слиянии. «замечание» после проверки записи шагом worktree.sh remarks идёт постановщику: обычно это слово «правка» и одна новая задача кодеру. Затем тот же ревьювер проверяет исправленные пункты."
+    },
+    {
+      "id": "merge-ok",
+      "lane": "user",
+      "col": 31,
+      "kind": "decision",
+      "decider": "user",
+      "name": "Подтверждение слияния",
+      "place": "чат",
+      "does": "Диспетчер называет обе ветки и предлагает ветку старта: «Слить feature/<feature-slug> в <ветка старта>?». Слияние идёт только после явного подтверждения в чате и когда в ветке слияния нет чужих незакоммиченных правок. Пользователь может назвать другую ветку."
+    },
+    {
+      "id": "merge",
+      "lane": "script",
+      "col": 32,
+      "kind": "step",
+      "name": "worktree.sh merge",
+      "place": "ветка слияния",
+      "does": "Скрипт сливает ветку фичи в подтверждённую ветку. Если она открыта в каком-то worktree, слияние там, иначе во временном worktree, который снимается сразу после слияния. Основную копию не переключает. Если ветка не текущая в основной копии и там есть новые записи журнала, скрипт до слияния останавливается словом «журнал»: диспетчер разбирает их сам или спрашивает пользователя и повторяет шаг, назвав записи этой фичи."
+    },
+    {
+      "id": "merge-res",
+      "lane": "script",
+      "col": 33,
+      "kind": "decision",
+      "decider": "script",
+      "name": "Результат слияния",
+      "place": "ветка слияния",
+      "does": "«слито»: фича в подтверждённой ветке. «конфликт»: слияние отменяется, основная копия не остаётся в конфликте."
+    },
+    {
+      "id": "done",
+      "lane": "disp",
+      "col": 34,
+      "kind": "step",
+      "name": "Фича слита",
+      "place": "ветка слияния",
+      "does": "Ветка фичи слита, worktree и ветка фичи сняты, журнал закоммичен."
+    }
+  ],
+  "edges": [
+    {
+      "from": "gate",
+      "to": "gate-ok",
+      "label": "пробелы есть",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "gate",
+      "to": "ask",
+      "label": "шлюз пройден",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "gate-ok",
+      "to": "ask",
+      "label": "согласие",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "gate-ok",
+      "to": "",
+      "label": "отказ: фича не стартует",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "ask",
+      "to": "form",
+      "label": "вопросы",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "form",
+      "to": "answer",
+      "label": "ответ пользователя",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "answer",
+      "to": "more",
+      "label": "ответ постановщику",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "more",
+      "to": "ask",
+      "label": "вопросы",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "more",
+      "to": "slice",
+      "label": "нарезка",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "more",
+      "to": "fork-end",
+      "label": "вопросов нет, развилка задачи",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "slice",
+      "to": "slice-rev",
+      "label": "нарезка",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "slice-rev",
+      "to": "slice-word",
+      "label": "слово ревьювера",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "slice-word",
+      "to": "approve",
+      "label": "готово",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "slice-word",
+      "to": "slice",
+      "label": "замечание",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "slice-word",
+      "to": "ask",
+      "label": "развилка",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "approve",
+      "to": "list",
+      "label": "одобрено",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "list",
+      "to": "approved",
+      "label": "список",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "approved",
+      "to": "show",
+      "label": "одобрена",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "approved",
+      "to": "slice-rev",
+      "label": "не одобрена",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "show",
+      "to": "start-ok",
+      "label": "ждёт согласия",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "start-ok",
+      "to": "launch",
+      "label": "согласие",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "start-ok",
+      "to": "slice",
+      "label": "другой ответ: перерезать",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "launch",
+      "to": "feature",
+      "label": "первая задача фичи",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "feature",
+      "to": "task",
+      "label": "ветка фичи готова",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "task",
+      "to": "code",
+      "label": "worktree готов",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "code",
+      "to": "code-word",
+      "label": "слово кодера",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "code-word",
+      "to": "sync",
+      "label": "готово",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "code-word",
+      "to": "fork",
+      "label": "развилка",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "fork",
+      "to": "ask",
+      "label": "вопросы",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "fork-end",
+      "to": "code",
+      "label": "закрыта",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "fork-end",
+      "to": "slice",
+      "label": "нарезка",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "sync",
+      "to": "sync-res",
+      "label": "результат",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "sync-res",
+      "to": "check",
+      "label": "готово",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "sync-res",
+      "to": "fix-conflict",
+      "label": "конфликт",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "fix-conflict",
+      "to": "sync",
+      "label": "готово",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "check",
+      "to": "check-res",
+      "label": "результат",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "check-res",
+      "to": "review",
+      "label": "зелёная или пропущено",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "check-res",
+      "to": "supply",
+      "label": "после конфликта: зелёная или пропущено",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "check-res",
+      "to": "code",
+      "label": "красная",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "check-res",
+      "to": "fill-check",
+      "label": "нет команды",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "fill-check",
+      "to": "check",
+      "label": "готово",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "review",
+      "to": "review-word",
+      "label": "слово ревьювера",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "review-word",
+      "to": "supply",
+      "label": "готово",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "review-word",
+      "to": "code",
+      "label": "замечание",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "review-word",
+      "to": "fork",
+      "label": "развилка",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "review-word",
+      "to": "fifth",
+      "label": "пятое замечание подряд",
+      "main": false,
+      "back": false
+    },
+    {
+      "from": "fifth",
+      "to": "code",
+      "label": "продолжить",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "supply",
+      "to": "supply-res",
+      "label": "результат",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "supply-res",
+      "to": "resolved",
+      "label": "готово",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "supply-res",
+      "to": "sync",
+      "label": "конфликт",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "resolved",
+      "to": "launch",
+      "label": "освободились задачи",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "resolved",
+      "to": "final",
+      "label": "все задачи resolved",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "final",
+      "to": "final-word",
+      "label": "слово",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "final-word",
+      "to": "merge-ok",
+      "label": "готово",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "final-word",
+      "to": "slice",
+      "label": "замечание",
+      "main": false,
+      "back": true
+    },
+    {
+      "from": "merge-ok",
+      "to": "merge",
+      "label": "согласие",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "merge",
+      "to": "merge-res",
+      "label": "результат",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "merge-res",
+      "to": "done",
+      "label": "слито",
+      "main": true,
+      "back": false
+    },
+    {
+      "from": "merge-res",
+      "to": "",
+      "label": "конфликт: слияние отменено",
+      "main": false,
+      "back": false
+    }
+  ],
+  "places": [
+    {
+      "name": "основная копия",
+      "path": "корень репозитория",
+      "branch": "та, что в ней уже выбрана",
+      "rules": "ради ветки фичи на другую ветку не переключается; каталоги .agentflow/.worktree и .agentflow/.scratch игнорирует и не коммитит; здесь лежат спека и файлы задач в .agentflow/.scratch, агенты работают с ними по абсолютному пути; записей в GLOSSARY.md не получает."
+    },
+    {
+      "name": "ветка фичи",
+      "path": ".agentflow/.worktree/<путь ветки фичи>",
+      "branch": "feature/<feature-slug>",
+      "rules": "у фичи одна ветка интеграции и свой worktree; ответвляется от ветки, открытой при запуске потока; создаётся при первом запуске задачи этой фичи; слияния задач в неё идут по одному; это не основная копия."
+    },
+    {
+      "name": "worktree задачи",
+      "path": ".agentflow/.worktree/<путь ветки задачи>",
+      "branch": "task/<feature-slug>-<NN>",
+      "rules": "на каждую одновременную задачу свой worktree, не больше трёх; у одного worktree одна ветка; в дереве лежат только продуктовый код и тесты; в дереве пишет один агент; инвариант для GLOSSARY.md кодер пишет здесь по критерию приёмки; это не основная копия."
+    },
+    {
+      "name": "ветка слияния",
+      "path": "по умолчанию ветка старта, открытая при запуске потока",
+      "branch": "ветка, которую подтвердил пользователь",
+      "rules": "ветка фичи сливается сюда один раз, когда закрыты все задачи фичи, и только после явного подтверждения пользователя в чате; если она открыта в каком-то worktree, слияние идёт там, иначе во временном worktree, который снимается сразу после; основная копия при этом не переключается; при конфликте слияние отменяется."
+    },
+    {
+      "name": "чат",
+      "path": "",
+      "branch": "",
+      "rules": "Разговор диспетчера с пользователем"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "normal",
+      "name": "Обычный путь",
+      "nodes": [
+        "gate",
+        "ask",
+        "form",
+        "answer",
+        "more",
+        "slice",
+        "slice-rev",
+        "slice-word",
+        "approve",
+        "list",
+        "approved",
+        "show",
+        "start-ok",
+        "launch",
+        "feature",
+        "task",
+        "code",
+        "code-word",
+        "sync",
+        "sync-res",
+        "check",
+        "check-res",
+        "review",
+        "review-word",
+        "supply",
+        "supply-res",
+        "resolved",
+        "final",
+        "final-word",
+        "merge-ok",
+        "merge",
+        "merge-res",
+        "done"
+      ]
+    },
+    {
+      "id": "fork",
+      "name": "Развилка у кодера",
+      "nodes": [
+        "launch",
+        "feature",
+        "task",
+        "code",
+        "code-word",
+        "fork",
+        "ask",
+        "form",
+        "answer",
+        "more",
+        "fork-end",
+        "code",
+        "code-word",
+        "sync",
+        "sync-res",
+        "check",
+        "check-res",
+        "review",
+        "review-word",
+        "supply",
+        "supply-res",
+        "resolved"
+      ]
+    },
+    {
+      "id": "review-fix",
+      "name": "Замечание ревьювера",
+      "nodes": [
+        "launch",
+        "feature",
+        "task",
+        "code",
+        "code-word",
+        "sync",
+        "sync-res",
+        "check",
+        "check-res",
+        "review",
+        "review-word",
+        "code",
+        "code-word",
+        "sync",
+        "sync-res",
+        "check",
+        "check-res",
+        "review",
+        "review-word",
+        "supply",
+        "supply-res",
+        "resolved"
+      ]
+    },
+    {
+      "id": "conflict",
+      "name": "Конфликт при доставке",
+      "nodes": [
+        "launch",
+        "feature",
+        "task",
+        "code",
+        "code-word",
+        "sync",
+        "sync-res",
+        "check",
+        "check-res",
+        "review",
+        "review-word",
+        "supply",
+        "supply-res",
+        "sync",
+        "sync-res",
+        "fix-conflict",
+        "sync",
+        "sync-res",
+        "check",
+        "check-res",
+        "supply",
+        "supply-res",
+        "resolved"
+      ]
+    },
+    {
+      "id": "red",
+      "name": "Красная проверка",
+      "nodes": [
+        "launch",
+        "feature",
+        "task",
+        "code",
+        "code-word",
+        "sync",
+        "sync-res",
+        "check",
+        "check-res",
+        "code",
+        "code-word",
+        "sync",
+        "sync-res",
+        "check",
+        "check-res",
+        "review",
+        "review-word",
+        "supply",
+        "supply-res",
+        "resolved"
+      ]
+    }
+  ]
+};
+/*FLOW_DATA_END*/
+</script>
+<!-- end region -->
+
+<!-- region: agent-marks -->
+<script>
+  (function () {
+    // Знаки агентов: одна таблица геометрии на шесть дорожек, цвет только через var(--agent) (правило data-lane в tokens).
+    const MARK_SVG_NS = 'http://www.w3.org/2000/svg';
+    const MARK_GLYPHS = {
+      user: '<circle cx="12" cy="12" r="3.5" style="fill:var(--agent)"/>',
+      disp: '<path d="M12 6.5 17.5 12 12 17.5 6.5 12Z" style="fill:var(--agent)"/>' +
+        '<circle cx="12" cy="12" r="1.4" style="fill:var(--surface)"/>',
+      post: '<path d="M12 7 17.5 16.5 6.5 16.5Z" style="fill:var(--agent)"/>',
+      coder: '<rect x="7.5" y="7.5" width="9" height="9" style="fill:var(--agent)"/>',
+      rev: '<circle cx="12" cy="12" r="4.5" style="fill:none;stroke:var(--agent);stroke-width:2"/>' +
+        '<line x1="7" y1="12" x2="17" y2="12" style="stroke:var(--agent);stroke-width:2"/>',
+      script: '<path d="M12 6.5 16.8 9.25 16.8 14.75 12 17.5 7.2 14.75 7.2 9.25Z" style="fill:var(--agent)"/>'
+    };
+    const reportedUnknown = new Set();
+
+    // agentMark(laneId, size): SVG-знак агента, квадрат size px.
+    function agentMark(laneId, size) {
+      const known = Object.prototype.hasOwnProperty.call(MARK_GLYPHS, laneId);
+      if (!known && !reportedUnknown.has(laneId)) {
+        reportedUnknown.add(laneId);
+        console.error('agentMark: неизвестный идентификатор дорожки «' + laneId + '»');
+      }
+      const svg = document.createElementNS(MARK_SVG_NS, 'svg');
+      svg.setAttribute('class', 'agent-mark');
+      svg.setAttribute('data-lane', laneId);
+      svg.setAttribute('width', String(size));
+      svg.setAttribute('height', String(size));
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('focusable', 'false');
+      svg.innerHTML =
+        '<circle class="agent-disk" cx="12" cy="12" r="11" style="fill:var(--surface)"/>' +
+        '<circle class="agent-ring" cx="12" cy="12" r="9.5" style="fill:none;stroke:var(--agent);stroke-width:1.5"/>' +
+        '<g class="agent-glyph">' + (known ? MARK_GLYPHS[laneId] : '') + '</g>';
+      return svg;
+    }
+
+    window.agentMark = agentMark;
+  })();
+</script>
+<!-- end region -->
+
+<!-- region: flow-view -->
+<script>
+  (function () {
+    // region: view-core
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const COL_W = 240;
+    const NODE_W = 124;
+    const X0 = 12;
+    const GAP = COL_W - NODE_W;
+    const NODE_LINE = 18;
+    const PLACE_LINE = 15;
+    const PLACE_GAP = 4;
+    const NODE_PAD = 12;
+    const EDGE_LINE = 15;
+    const LANE_PAD = 22;
+    const STUB_LEN = GAP - 6;
+    const CUT = 14;
+    const SLOT_STEP = 9;
+    const SLOT_ORDER = [0, -1, 1, -2, 2, -3, 3].map(k => k * SLOT_STEP);
+
+    const flowEl = document.getElementById('flow');
+    const panelEl = document.getElementById('panel');
+    const floatEl = document.getElementById('float');
+    const btnHide = document.getElementById('btn-hide');
+    const btnShow = document.getElementById('btn-show');
+    const wideQuery = window.matchMedia('(min-width: 760px)');
+    let panelOpen = true;
+    const scrollEl = flowEl.parentNode;
+
+    const laneName = {};
+    const laneIndex = {};
+    FLOW.lanes.forEach((l, i) => { laneName[l.id] = l.name; laneIndex[l.id] = i; });
+    const nodeById = {};
+    FLOW.nodes.forEach(n => { nodeById[n.id] = n; });
+    const placeByName = {};
+    FLOW.places.forEach(p => { placeByName[p.name] = p; });
+    const DECIDER = {
+      user: 'решает пользователь',
+      agent: 'решает агент по слову возврата',
+      script: 'решает скрипт по результату'
+    };
+    const state = { selected: null };
+
+    function svgEl(tag, attrs, parent) {
+      const n = document.createElementNS(SVG_NS, tag);
+      for (const k in attrs) n.setAttribute(k, attrs[k]);
+      if (parent) parent.appendChild(n);
+      return n;
+    }
+
+    function mk(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      n.textContent = text;
+      return n;
+    }
+
+    // Замер текста в браузере: перенос по словам по реальной ширине.
+    function measure(probe, s) {
+      probe.textContent = s;
+      return probe.getComputedTextLength();
+    }
+
+    function wrap(probe, text, maxW) {
+      const lines = [];
+      let cur = '';
+      for (const w of text.split(' ')) {
+        const next = cur ? cur + ' ' + w : w;
+        if (cur && measure(probe, next) > maxW) {
+          lines.push(cur);
+          cur = w;
+        } else {
+          cur = next;
+        }
+      }
+      if (cur) lines.push(cur);
+      return lines;
+    }
+
+    function paint() {
+      const sel = state.selected;
+      flowEl.classList.toggle('has-selection', sel !== null);
+      FLOW.nodes.forEach(n => {
+        const g = nodeEls[n.id];
+        const on = n.id === sel;
+        g.classList.toggle('is-selected', on);
+        g.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      paintOutgoing();
+      paintProgress();
+      paintAgents();
+      renderPanel();
+    }
+
+    // Подсветка исходящих стрелок активного шага. Наведение старше фокуса, фокус старше выбора.
+    // Здесь только граф: панель и aria-live не перерисовываются при наведении и фокусе.
+    let hoverId = null;
+    let focusId = null;
+
+    function paintOutgoing() {
+      const active = hoverId !== null ? hoverId : focusId !== null ? focusId : state.selected;
+      flowEl.classList.toggle('has-out', active !== null);
+      edgeEls.forEach(({ e, g, path }) => {
+        const on = active !== null && e.from === active;
+        g.classList.toggle('is-out', on);
+        path.setAttribute('marker-end', on ? 'url(#arrow-hi)' : 'url(#arrow)');
+      });
+    }
+
+    function select(id) {
+      state.selected = id;
+      paint();
+    }
+
+    // Наведение только мышью: касание работает как щелчок и не оставляет подсветку после перехода.
+    flowEl.addEventListener('pointerover', ev => {
+      if (ev.pointerType !== 'mouse') return;
+      const g = ev.target.closest('.node-g');
+      if (!g) return;
+      hoverId = g.dataset.id;
+      paintOutgoing();
+    });
+
+    flowEl.addEventListener('pointerout', ev => {
+      if (ev.pointerType !== 'mouse') return;
+      if (!ev.target.closest('.node-g')) return;
+      hoverId = null;
+      paintOutgoing();
+    });
+
+    flowEl.addEventListener('pointerleave', ev => {
+      if (ev.pointerType !== 'mouse') return;
+      hoverId = null;
+      paintOutgoing();
+    });
+
+    flowEl.addEventListener('focusin', ev => {
+      const g = ev.target.closest('.node-g');
+      if (!g) return;
+      focusId = g.dataset.id;
+      paintOutgoing();
+    });
+
+    flowEl.addEventListener('focusout', ev => {
+      if (!ev.target.closest('.node-g')) return;
+      focusId = null;
+      paintOutgoing();
+    });
+
+    flowEl.addEventListener('click', ev => {
+      const g = ev.target.closest('.node-g');
+      if (g) pickByUser(g.dataset.id);
+    });
+
+    flowEl.addEventListener('keydown', ev => {
+      const g = ev.target.closest('.node-g');
+      if (!g) return;
+      const i = order.findIndex(n => n.id === g.dataset.id);
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        pickByUser(g.dataset.id);
+      } else if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        nodeEls[order[Math.min(i + 1, order.length - 1)].id].focus();
+      } else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        nodeEls[order[Math.max(i - 1, 0)].id].focus();
+      }
+    });
+    // end region
+
+    // region: view-lanes
+    // Замер и раскладка: одна высота узла и дорожки на весь граф.
+    const probeSvg = svgEl('svg', { class: 'flow-svg', width: 0, height: 0, style: 'position:absolute;visibility:hidden' }, flowEl);
+    const probeNode = svgEl('text', { class: 'node-name' }, probeSvg);
+    const probeEdge = svgEl('text', { class: 'edge-label' }, probeSvg);
+    const probePlace = svgEl('text', { class: 'node-place' }, probeSvg);
+
+    const nodeLines = {};
+    FLOW.nodes.forEach(n => { nodeLines[n.id] = wrap(probeNode, n.name, NODE_W - 16); });
+    const maxLines = Math.max(...FLOW.nodes.map(n => nodeLines[n.id].length));
+    // Подпись места на узле: строки по той же ширине, что и название.
+    const placeLines = {};
+    FLOW.nodes.forEach(n => { placeLines[n.id] = wrap(probePlace, n.place, NODE_W - 16); });
+    const maxPlaceLines = Math.max(...FLOW.nodes.map(n => placeLines[n.id].length));
+    const NAME_H = maxLines * NODE_LINE;
+    const PLACE_H = maxPlaceLines * PLACE_LINE;
+    const NODE_H = NODE_PAD + NAME_H + PLACE_GAP + PLACE_H + NODE_PAD;
+    const LANE_H = NODE_H + LANE_PAD * 2;
+
+    // Подписи связей меряем, пока замеряющий элемент в дереве.
+    const labels = FLOW.edges.map(e => {
+      const lines = wrap(probeEdge, e.label, GAP - 12);
+      const tw = Math.max(...lines.map(l => measure(probeEdge, l)));
+      return { lines, bw: tw + 10, bh: lines.length * EDGE_LINE + 6 };
+    });
+    flowEl.textContent = '';
+
+    const colX = c => X0 + (c - 1) * COL_W;
+    const gapLeft = g => colX(g) + NODE_W;
+    const maxCol = Math.max(...FLOW.nodes.map(n => n.col));
+    const W = colX(maxCol) + NODE_W + X0;
+    const H = FLOW.lanes.length * LANE_H;
+
+    const pos = {};
+    FLOW.nodes.forEach(n => {
+      const x = colX(n.col);
+      const y = laneIndex[n.lane] * LANE_H + LANE_PAD;
+      pos[n.id] = { x, y, cy: y + NODE_H / 2, lane: laneIndex[n.lane], col: n.col };
+    });
+
+    // Раскладка связей. Вертикали идут в промежутках между колонками (gap g лежит между колонкой g и g+1),
+    // горизонтали - в полосах между дорожками (band b лежит на границе дорожек b-1 и b).
+    // Узлы не пересекаются: ни промежуток, ни полоса не проходят через узел.
+    function blockedBetween(a, b) {
+      const lo = Math.min(pos[a].x, pos[b].x);
+      const hi = Math.max(pos[a].x, pos[b].x);
+      return FLOW.nodes.some(m => {
+        const p = pos[m.id];
+        return m.id !== a && m.id !== b && p.lane === pos[a].lane && p.x > lo && p.x < hi;
+      });
+    }
+
+    const info = FLOW.edges.map((e, id) => {
+      if (!e.to) return { id, e, stub: true, a: e.from, b: null, sA: 'r' };
+      const fwd = pos[e.to].col >= pos[e.from].col;
+      return {
+        id, e, stub: false, a: e.from, b: e.to,
+        sA: fwd ? 'r' : 'l', sB: fwd ? 'l' : 'r',
+        direct: pos[e.from].lane === pos[e.to].lane && !blockedBetween(e.from, e.to)
+      };
+    });
+
+    // Место на стороне узла: пул (дорожка, промежуток). Прямые связи занимают смещение 0 во всех промежутках,
+    // которые проходят, остальные берут свободное смещение из пула.
+    const used = {};
+    const anchorY = {};
+    function reserveOff(lane, gap, off) {
+      const k = lane + ':' + gap;
+      used[k] = used[k] || [];
+      if (used[k].indexOf(off) >= 0) throw new Error('Два прямых хода заняли одно место: ' + k);
+      used[k].push(off);
+    }
+    function pickOff(lane, gap) {
+      const k = lane + ':' + gap;
+      used[k] = used[k] || [];
+      const off = SLOT_ORDER.find(o => used[k].indexOf(o) < 0);
+      if (off === undefined) throw new Error('В пуле не осталось мест: ' + k);
+      used[k].push(off);
+      return off;
+    }
+    function gapOf(id, side) {
+      return side === 'r' ? pos[id].col : pos[id].col - 1;
+    }
+
+    info.filter(it => it.stub || it.direct).forEach(it => {
+      const lane = pos[it.a].lane;
+      const c1 = pos[it.a].col;
+      let gaps = [c1];
+      if (!it.stub) {
+        const c2 = pos[it.b].col;
+        gaps = [];
+        for (let g = Math.min(c1, c2); g < Math.max(c1, c2); g++) gaps.push(g);
+      }
+      gaps.forEach(g => reserveOff(lane, g, 0));
+      anchorY[it.id] = { A: pos[it.a].cy, B: it.stub ? null : pos[it.b].cy };
+    });
+    info.filter(it => !it.stub && !it.direct).forEach(it => {
+      const offA = pickOff(pos[it.a].lane, gapOf(it.a, it.sA));
+      const offB = pickOff(pos[it.b].lane, gapOf(it.b, it.sB));
+      anchorY[it.id] = { A: pos[it.a].cy + offA, B: pos[it.b].cy + offB };
+    });
+
+    const plans = info.map(it => {
+      const id = it.id;
+      if (it.stub) {
+        const A = { x: pos[it.a].x + NODE_W, y: anchorY[id].A };
+        return { id, e: it.e, pts: [A, { x: A.x + STUB_LEN, y: A.y }] };
+      }
+      const A = { x: it.sA === 'r' ? pos[it.a].x + NODE_W : pos[it.a].x, y: anchorY[id].A };
+      const B = { x: it.sB === 'r' ? pos[it.b].x + NODE_W : pos[it.b].x, y: anchorY[id].B };
+      if (it.direct) return { id, e: it.e, pts: [A, B] };
+      const gA = gapOf(it.a, it.sA);
+      const gB = gapOf(it.b, it.sB);
+      if (gA === gB) {
+        return { id, e: it.e, pts: [A, { g: gA, y: A.y }, { g: gA, y: B.y }, B] };
+      }
+      const la = pos[it.a].lane, lb = pos[it.b].lane;
+      const bd = lb > la ? la + 1 : (lb < la ? la : (la < 5 ? la + 1 : la));
+      return { id, e: it.e, pts: [A, { g: gA, y: A.y }, { g: gA, b: bd }, { g: gB, b: bd }, { g: gB, y: B.y }, B] };
+    });
+
+    // Номера дорожек в промежутках и полосах: каждая связь получает свой трек.
+    const gapUse = {};
+    const bandUse = {};
+    function push(map, key, id) {
+      const list = map[key] = map[key] || [];
+      if (list.indexOf(id) < 0) list.push(id);
+    }
+    plans.forEach(p => p.pts.forEach(q => {
+      if (q.g !== undefined) push(gapUse, q.g, p.id);
+      if (q.b !== undefined) push(bandUse, q.b, p.id);
+    }));
+    function resolve(p) {
+      return p.pts.map(q => {
+        if (q.g === undefined) return { x: q.x, y: q.y };
+        const gl = gapUse[q.g];
+        const x = gapLeft(q.g) + GAP * (gl.indexOf(p.id) + 1) / (gl.length + 1);
+        let y = q.y;
+        if (q.b !== undefined) {
+          const bl = bandUse[q.b];
+          y = q.b * LANE_H - LANE_PAD + 2 * LANE_PAD * (bl.indexOf(p.id) + 1) / (bl.length + 1);
+        }
+        return { x, y };
+      });
+    }
+    plans.forEach(p => { p.xy = resolve(p); });
+
+    // Подписи: кандидаты - середины сегментов (самые длинные первыми). Берётся первое место без наложений
+    // на узлы и на уже поставленные подписи; если такого нет, то место с наименьшим числом наложений.
+    const nodeBoxes = FLOW.nodes.map(n => ({ x: pos[n.id].x, y: pos[n.id].y, w: NODE_W, h: NODE_H }));
+    const placedBoxes = [];
+    const overlaps = (a, b, pad) => a.x - pad < b.x + b.w && b.x - pad < a.x + a.w && a.y - pad < b.y + b.h && b.y - pad < a.y + a.h;
+    function candidates(xy, L) {
+      const segs = [];
+      for (let i = 0; i + 1 < xy.length; i++) {
+        const p = xy[i], q = xy[i + 1];
+        const len = Math.hypot(q.x - p.x, q.y - p.y);
+        if (len > 0.5) segs.push({ p, q, len });
+      }
+      segs.sort((s, t) => t.len - s.len);
+      const out = [];
+      segs.forEach(({ p, q }) => {
+        const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+        out.push({ x: mx, y: my });
+        if (p.y === q.y) {
+          out.push({ x: mx, y: my - L.bh / 2 - 4 });
+          out.push({ x: mx, y: my + L.bh / 2 + 4 });
+        } else {
+          out.push({ x: mx - L.bw / 2 - 4, y: my });
+          out.push({ x: mx + L.bw / 2 + 4, y: my });
+        }
+      });
+      return out;
+    }
+    const byPriority = plans.slice().sort((p, q) => Number(q.e.main) - Number(p.e.main) || p.id - q.id);
+    byPriority.forEach(p => {
+      const L = labels[p.id];
+      let best = null;
+      let bestN = Infinity;
+      for (const c of candidates(p.xy, L)) {
+        const box = { x: c.x - L.bw / 2, y: c.y - L.bh / 2, w: L.bw, h: L.bh };
+        let n = (box.x < 0 || box.y < 0 || box.x + box.w > W || box.y + box.h > H) ? 1 : 0;
+        n += nodeBoxes.filter(nb => overlaps(box, nb, 3)).length;
+        n += placedBoxes.filter(pb => overlaps(box, pb, 3)).length;
+        if (n < bestN) { bestN = n; best = { c, box }; }
+        if (n === 0) break;
+      }
+      placedBoxes.push(best.box);
+      p.lab = { cx: best.c.x, cy: best.c.y, L };
+    });
+
+    const order = FLOW.nodes.slice().sort((a, b) => a.col - b.col || laneIndex[a.lane] - laneIndex[b.lane]);
+
+    // Легенда «Обозначения»: нативный details над графом, закрыт при загрузке. Открывает и закрывает его только браузер.
+    const legendEl = mk('details', 'legend');
+    legendEl.appendChild(mk('summary', 'legend-summary', 'Обозначения'));
+    const legendItemsEl = mk('div', 'legend-items');
+    legendEl.appendChild(legendItemsEl);
+    scrollEl.parentNode.insertBefore(legendEl, scrollEl);
+
+    // Колонка дорожек: крупный знак агента, имя дорожки и реплика. Строится из FLOW.lanes.
+    // Переменная labelsEl читается в view-player (keepVisible), поэтому имя не меняется.
+    const labelsEl = mk('div', 'lane-column');
+    const laneRows = {};
+    FLOW.lanes.forEach((l, i) => {
+      const row = mk('div', 'lane-agent');
+      row.dataset.lane = l.id;
+      row.style.height = LANE_H + 'px';
+      row.style.setProperty('--phase', (-0.7 * i) + 's');
+      const mark = mk('div', 'lane-mark');
+      mark.appendChild(agentMark(l.id, 48));
+      const text = mk('div', 'lane-text');
+      text.appendChild(mk('div', 'lane-name', l.name));
+      const say = mk('div', 'lane-say', '');
+      text.appendChild(say);
+      row.appendChild(mark);
+      row.appendChild(text);
+      labelsEl.appendChild(row);
+      laneRows[l.id] = { row, say };
+    });
+    flowEl.appendChild(labelsEl);
+
+    const svg = svgEl('svg', {
+      class: 'flow-svg',
+      width: W,
+      height: H,
+      viewBox: '0 0 ' + W + ' ' + H,
+      role: 'group',
+      'aria-label': 'Дорожки: ' + FLOW.lanes.map(l => l.name).join(', ')
+    }, flowEl);
+
+    const defs = svgEl('defs', {}, svg);
+    const marker = svgEl('marker', {
+      id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5,
+      markerWidth: 7, markerHeight: 7, orient: 'auto'
+    }, defs);
+    svgEl('path', { class: 'edge-head', d: 'M0,0 L10,5 L0,10 z' }, marker);
+    // Стрелка подсвеченной связи: акцентная заливка и размер в единицах холста, чтобы не растягивалась вместе с толстой линией.
+    const markerHi = svgEl('marker', {
+      id: 'arrow-hi', viewBox: '0 0 10 10', refX: 9, refY: 5,
+      markerWidth: 12, markerHeight: 12, markerUnits: 'userSpaceOnUse', orient: 'auto'
+    }, defs);
+    svgEl('path', { class: 'edge-head-hi', d: 'M0,0 L10,5 L0,10 z' }, markerHi);
+
+    // Подкладка дорожек: первой в холсте, под разделителями и узлами. Цвет - через data-lane (--agent).
+    FLOW.lanes.forEach((l, i) => {
+      svgEl('rect', { class: 'lane-band', 'data-lane': l.id, x: 0, y: i * LANE_H, width: W, height: LANE_H }, svg);
+    });
+    FLOW.lanes.forEach((l, i) => {
+      svgEl('line', { class: 'lane-sep', x1: 0, x2: W, y1: i * LANE_H, y2: i * LANE_H }, svg);
+    });
+    svgEl('line', { class: 'lane-sep', x1: 0, x2: W, y1: H, y2: H }, svg);
+
+    // Живая дорожка: только та, которой принадлежит выбранный шаг (он же текущий шаг сценария).
+    // Без выбора ни одна. Классы и текст меняются на месте, без пересоздания строк, поэтому не мигает.
+    function paintAgents() {
+      const sel = state.selected;
+      const lane = sel !== null ? nodeById[sel].lane : null;
+      FLOW.lanes.forEach(l => {
+        const r = laneRows[l.id];
+        const on = l.id === lane;
+        r.row.classList.toggle('is-alive', on);
+        r.say.textContent = on ? nodeById[sel].name : '';
+      });
+    }
+    // end region
+
+    // region: view-nodes
+    // Радиус узла-прямоугольника равен --r-node (8). Подложка подписи связи - 4 (как в спеке).
+    const NODE_R = 8;
+    const EDGE_LABEL_R = 4;
+    // Форма по тому, кто решает: шаг - прямоугольник, решение пользователя - капсула,
+    // решение агента - шестиугольник, решение скрипта - восьмиугольник.
+    function shapeEl(decider, box, cls, parent, cutOverride) {
+      const x = box.x, y = box.y, w = box.w, h = box.h;
+      if (decider === 'user') {
+        return svgEl('rect', { class: cls, x, y, width: w, height: h, rx: Math.min(22, h / 2) }, parent);
+      }
+      if (decider === 'agent' || decider === 'script') {
+        const c = cutOverride ?? Math.min(CUT, w / 4);
+        const pts = decider === 'agent'
+          ? [[x + c, y], [x + w - c, y], [x + w, y + h / 2], [x + w - c, y + h], [x + c, y + h], [x, y + h / 2]]
+          : [[x + c, y], [x + w - c, y], [x + w, y + c], [x + w, y + h - c], [x + w - c, y + h], [x + c, y + h], [x, y + h - c], [x, y + c]];
+        return svgEl('polygon', { class: cls, points: pts.map(p => p.join(',')).join(' ') }, parent);
+      }
+      return svgEl('rect', { class: cls, x, y, width: w, height: h, rx: box.r ?? NODE_R }, parent);
+    }
+
+    // Все связи таблицы. Назад - пунктир, вне обычного пути - тоньше.
+    const edgesG = svgEl('g', { 'aria-hidden': 'true' }, svg);
+    const edgeEls = [];
+    plans.forEach(p => {
+      const e = p.e;
+      const g = svgEl('g', { class: 'edge-g', 'data-from': e.from, 'data-to': e.to }, edgesG);
+      const d = p.xy.map((q, i) => (i ? 'L' : 'M') + q.x.toFixed(1) + ',' + q.y.toFixed(1)).join(' ');
+      const cls = 'edge' + (e.back ? ' is-back' : '') + (e.main ? '' : ' is-side');
+      const path = svgEl('path', { class: cls, d, 'marker-end': 'url(#arrow)' }, g);
+      const tip = svgEl('title', {}, g);
+      tip.textContent = e.label;
+      const { cx, cy, L } = p.lab;
+      svgEl('rect', { class: 'edge-label-bg', x: cx - L.bw / 2, y: cy - L.bh / 2, width: L.bw, height: L.bh, rx: EDGE_LABEL_R }, g);
+      L.lines.forEach((l, i) => {
+        const t = svgEl('text', {
+          class: 'edge-label', x: cx, y: cy - (L.lines.length - 1) * EDGE_LINE / 2 + i * EDGE_LINE,
+          'text-anchor': 'middle', 'dominant-baseline': 'central'
+        }, g);
+        t.textContent = l;
+      });
+      edgeEls.push({ e, g, path, xy: p.xy });
+    });
+
+    // Узлы: одна строка на дорожку, слева направо по col. Форма показывает, кто решает.
+    const nodesG = svgEl('g', {}, svg);
+    const nodeEls = {};
+    FLOW.nodes.forEach(n => {
+      const p = pos[n.id];
+      const lines = nodeLines[n.id];
+      const decider = n.kind === 'decision' ? n.decider : null;
+      const box = { x: p.x, y: p.y, w: NODE_W, h: NODE_H, r: NODE_R };
+      // Кольца концентричны узлу: радиус растёт на тот же отступ.
+      const grow = d => ({ x: box.x - d, y: box.y - d, w: box.w + 2 * d, h: box.h + 2 * d, r: NODE_R + d });
+      const g = svgEl('g', {
+        class: 'node-g',
+        'data-id': n.id,
+        'data-lane': n.lane,
+        tabindex: 0,
+        role: 'button',
+        'aria-pressed': 'false',
+        'aria-label': n.name + '. ' + laneName[n.lane] + '. Место: ' + n.place + (decider ? '. ' + DECIDER[decider] : '')
+      }, nodesG);
+      // Зона попадания не двигается при приподнимании: иначе курсор у нижнего края выходит из узла и узел дрожит.
+      shapeEl(decider, grow(3), 'node-hit', g);
+      shapeEl(decider, grow(5), 'focus-ring', g);
+      shapeEl(decider, grow(4), 'node-ring', g);
+      shapeEl(decider, grow(3), 'passed-ring', g);
+      shapeEl(decider, box, 'node', g);
+      lines.forEach((l, i) => {
+        const t = svgEl('text', {
+          class: 'node-name',
+          x: p.x + NODE_W / 2,
+          y: p.y + NODE_PAD + NAME_H / 2 - (lines.length - 1) * NODE_LINE / 2 + i * NODE_LINE,
+          'text-anchor': 'middle',
+          'dominant-baseline': 'central'
+        }, g);
+        t.textContent = l;
+      });
+      const placeTop = p.y + NODE_PAD + NAME_H + PLACE_GAP;
+      placeLines[n.id].forEach((l, i) => {
+        const t = svgEl('text', {
+          class: 'node-place',
+          x: p.x + NODE_W / 2,
+          y: placeTop + PLACE_LINE / 2 + i * PLACE_LINE,
+          'text-anchor': 'middle',
+          'dominant-baseline': 'central'
+        }, g);
+        t.textContent = l;
+      });
+      nodeEls[n.id] = g;
+    });
+
+    // Легенда: три формы решений и пунктир связи назад.
+    function buildLegend() {
+      [['user', DECIDER.user], ['agent', DECIDER.agent], ['script', DECIDER.script]].forEach(([decider, text]) => {
+        const item = mk('div', 'legend-item');
+        const sv = svgEl('svg', { class: 'legend-sample', width: 40, height: 22, viewBox: '0 0 40 22', 'aria-hidden': 'true' });
+        // На образце 40×22 срез по умолчанию (w/4 ≈ 9.5) съедает почти половину высоты: восьмиугольник похож на шестиугольник.
+        shapeEl(decider, { x: 1, y: 1, w: 38, h: 20 }, 'node', sv, 6);
+        item.appendChild(sv);
+        item.appendChild(mk('span', '', text));
+        legendItemsEl.appendChild(item);
+      });
+      const back = mk('div', 'legend-item');
+      const bv = svgEl('svg', { class: 'legend-sample', width: 40, height: 22, viewBox: '0 0 40 22', 'aria-hidden': 'true' });
+      svgEl('path', { class: 'edge is-back', d: 'M2,11 L38,11' }, bv);
+      back.appendChild(bv);
+      back.appendChild(mk('span', '', 'пунктир: связь назад по времени'));
+      legendItemsEl.appendChild(back);
+    }
+    buildLegend();
+    // end region
+
+    // region: view-panel
+    // Карточка места: для чата один текст, для остальных мест путь, ветка и правила списком.
+    function placeCard(name) {
+      const place = placeByName[name];
+      if (!place) return null;
+      const card = mk('section', 'place-card');
+      card.setAttribute('aria-label', 'Место: ' + place.name);
+      card.appendChild(mk('h3', 'place-title', place.name));
+      if (!place.path) {
+        card.appendChild(mk('p', 'place-note', place.rules));
+        return card;
+      }
+      const dl = document.createElement('dl');
+      dl.className = 'facts';
+      const add = (k, v) => {
+        dl.appendChild(mk('dt', '', k));
+        dl.appendChild(mk('dd', '', v));
+      };
+      add('Путь', place.path);
+      add('Ветка', place.branch);
+      const ul = mk('ul', 'outcomes');
+      place.rules.split('; ').forEach(r => ul.appendChild(mk('li', '', r)));
+      dl.appendChild(mk('dt', '', 'Правила'));
+      const dd = document.createElement('dd');
+      dd.appendChild(ul);
+      dl.appendChild(dd);
+      card.appendChild(dl);
+      return card;
+    }
+
+    // Исход решения на пути выбранного сценария. Если маркер стоит на этом решении, это его текущий заход;
+    // иначе перечисляются все заходы сценария. Вызывается только после инициализации сценариев.
+    function outcomeAt(k) {
+      const from = scenNodes[k];
+      const to = scenNodes[k + 1];
+      if (to === undefined) return 'сценарий здесь заканчивается';
+      const e = FLOW.edges.find(x => x.from === from && x.to === to);
+      return e ? e.label + ' → ' + nodeById[to].name : 'связь не найдена';
+    }
+    function scenarioLines(id) {
+      const visits = [];
+      scenNodes.forEach((nid, k) => { if (nid === id) visits.push(k); });
+      if (!visits.length) return ['В этом сценарии это решение не встречается.'];
+      if (cur >= 0 && scenNodes[cur] === id) return ['здесь: ' + outcomeAt(cur)];
+      return visits.map((k, i) => (visits.length > 1 ? 'заход ' + (i + 1) + ': ' : 'в сценарии: ') + outcomeAt(k));
+    }
+
+    // Шапка карточки: крупный знак агента и его роль из FLOW.lanes. Цвет только через data-lane.
+    function agentHead(n) {
+      const head = mk('header', 'agent-card-head');
+      head.setAttribute('data-lane', n.lane);
+      const mark = mk('span', 'agent-card-mark');
+      mark.appendChild(agentMark(n.lane, 64));
+      head.appendChild(mark);
+      head.appendChild(mk('p', 'agent-card-role', laneName[n.lane]));
+      return head;
+    }
+
+    // Блок «Дальше»: все исходящие связи шага, у каждой слово возврата и агент-получатель с малым знаком.
+    // Связь без получателя показывает только подпись.
+    function nextBlock(n) {
+      const section = mk('section', 'agent-next');
+      section.appendChild(mk('h3', 'agent-next-title', 'Дальше'));
+      const ul = mk('ul', 'agent-next-list');
+      FLOW.edges.filter(e => e.from === n.id).forEach(e => {
+        const li = document.createElement('li');
+        li.className = 'agent-next-item';
+        li.appendChild(mk('span', 'agent-next-label', e.label));
+        if (e.to) {
+          const to = nodeById[e.to];
+          const who = mk('span', 'agent-next-to');
+          who.setAttribute('data-lane', to.lane);
+          who.appendChild(agentMark(to.lane, 24));
+          who.appendChild(mk('span', 'agent-next-to-name', laneName[to.lane] + ': ' + to.name));
+          li.appendChild(who);
+        }
+        ul.appendChild(li);
+      });
+      section.appendChild(ul);
+      return section;
+    }
+
+    // Пустое состояние: ряд знаков всех шести агентов как легенда.
+    function agentRow() {
+      const row = mk('ul', 'agent-row');
+      FLOW.lanes.forEach(l => {
+        const item = document.createElement('li');
+        item.className = 'agent-row-item';
+        item.setAttribute('data-lane', l.id);
+        item.appendChild(agentMark(l.id, 40));
+        item.appendChild(mk('span', '', l.name));
+        row.appendChild(item);
+      });
+      return row;
+    }
+
+    function renderPanel() {
+      panelEl.textContent = '';
+      const n = nodeById[state.selected];
+      if (!n) {
+        panelEl.appendChild(mk('p', 'panel-empty', 'Выберите шаг в графе: кликом, или Tab к нему и Enter либо Space. Стрелки переводят к соседнему шагу.'));
+        panelEl.appendChild(agentRow());
+        return;
+      }
+      panelEl.appendChild(agentHead(n));
+      panelEl.appendChild(mk('h2', 'panel-title', n.name));
+      // Шаг пишется абзацами с подписью, без таблицы фактов: панель это карточка агента.
+      const step = document.createElement('div');
+      step.className = 'step-block';
+      const add = (k, v) => {
+        const line = mk('p', 'step-line', '');
+        line.appendChild(mk('span', 'step-k', k));
+        line.appendChild(document.createTextNode(v));
+        step.appendChild(line);
+      };
+      if (n.kind === 'decision') {
+        add('Кто решает', DECIDER[n.decider]);
+        add('Вопрос', n.does);
+      } else {
+        add('Что происходит', n.does);
+      }
+      panelEl.appendChild(step);
+      panelEl.appendChild(nextBlock(n));
+      if (n.kind === 'decision') {
+        // Короткая подпись: длинная подпись растягивает колонку dt у всей таблицы фактов.
+        const sc = document.createElement('dl');
+        sc.className = 'facts agent-scenario';
+        sc.appendChild(mk('dt', '', 'В сценарии'));
+        const sdd = document.createElement('dd');
+        sdd.appendChild(mk('div', '', '«' + scen.name + '»'));
+        scenarioLines(n.id).forEach(t => sdd.appendChild(mk('div', '', t)));
+        sc.appendChild(sdd);
+        panelEl.appendChild(sc);
+      }
+      const card = placeCard(n.place);
+      if (card) panelEl.appendChild(card);
+    }
+
+    // Свёртывание и развёртывание панели. Фокус переносится только при нажатии кнопки,
+    // потому что скрытая кнопка не может держать фокус.
+    function setPanelOpen(open, focusTarget) {
+      panelOpen = open;
+      floatEl.classList.toggle('is-collapsed', !open);
+      btnHide.setAttribute('aria-expanded', String(open));
+      btnShow.setAttribute('aria-expanded', String(open));
+      if (focusTarget) focusTarget.focus();
+      renderMarker();
+    }
+
+    btnHide.addEventListener('click', () => setPanelOpen(false, btnShow));
+    btnShow.addEventListener('click', () => setPanelOpen(true, btnHide));
+    window.addEventListener('resize', renderMarker);
+    // end region
+
+    // region: view-player
+    // Плеер: конверт проходит сценарий по связям FLOW.edges, на каждом шаге стоит около 1 с.
+    // Конверт едет по маршруту routeFor(a, b) от отправителя к получателю; у получателя на ~700 мс вспыхивает узел (is-received).
+    // Узлы и связи берутся только из FLOW; проверка данных - при загрузке.
+    // Наружу открыты только window.FlowRoutes и событие flow-player-state на document.
+    const MOVE_MS = 500;
+    const DWELL_MS = 1000;
+    const RECEIVE_MS = 700;
+    const PLAY_GLYPH = '<path d="M2 1 L11 6 L2 11 Z"/>';
+    const RESET_GLYPH = '<rect x="1" y="1" width="2" height="10"/><path d="M11 1 L11 11 L4 6 Z"/>';
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const scenarioEl = document.getElementById('scenario');
+    const btnPlay = document.getElementById('btn-play');
+    const btnPause = document.getElementById('btn-pause');
+    const btnBack = document.getElementById('btn-back');
+    const btnStep = document.getElementById('btn-step');
+    const btnReset = document.getElementById('btn-reset');
+    const trackEl = document.getElementById('player-track');
+    const statusEl = document.getElementById('player-status');
+    const noteEl = document.getElementById('player-note');
+
+    // Конверт: группа в координатах SVG, положение задаёт transform. Цвет отправителя - через data-lane на группе.
+    const env = svgEl('g', { class: 'flow-envelope', 'aria-hidden': 'true' }, svg);
+    svgEl('rect', { class: 'envelope-halo', x: -3, y: -3, width: 30, height: 22, rx: 5 }, env);
+    const envBody = svgEl('rect', { class: 'envelope-body', x: 0, y: 0, width: 24, height: 16, rx: 2 }, env);
+    svgEl('path', { class: 'envelope-flap', d: 'M1.5 1.5 L12 9.5 L22.5 1.5' }, env);
+    const tagG = svgEl('g', { class: 'envelope-tag', transform: 'translate(28 0)' }, env);
+    const tagBg = svgEl('rect', { class: 'envelope-tag-bg', x: 0, y: 0, width: 12, height: 16, rx: 3 }, tagG);
+    const tagText = svgEl('text', { class: 'envelope-tag-text', x: 6, y: 8, 'dominant-baseline': 'central' }, tagG);
+    env.style.display = 'none';
+
+    function reduced() { return motionQuery.matches; }
+
+    // Связь между соседними узлами в любом направлении. rev: связь идёт от b к a.
+    function edgeBetween(a, b) {
+      const fwd = edgeEls.find(x => x.e.from === a && x.e.to === b);
+      if (fwd) return { el: fwd, rev: false };
+      const back = edgeEls.find(x => x.e.from === b && x.e.to === a);
+      if (back) return { el: back, rev: true };
+      return null;
+    }
+
+    // Тест корректности данных: одна ошибка на сценарий, с именем и первой битой парой.
+    // Пара проверяется по направлению: связь должна идти от первого узла ко второму.
+    FLOW.scenarios.forEach(s => {
+      for (let i = 0; i + 1 < s.nodes.length; i++) {
+        const a = s.nodes[i];
+        const b = s.nodes[i + 1];
+        if (!nodeById[a] || !nodeById[b] || !FLOW.edges.some(e => e.from === a && e.to === b)) {
+          console.error('Сценарий «' + s.name + '»: пара «' + a + ' → ' + b + '» не является связью FLOW.edges');
+          break;
+        }
+      }
+    });
+
+    FLOW.scenarios.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name;
+      scenarioEl.appendChild(opt);
+    });
+
+    // Узлы несут дорожку в data-lane: цвет агента для вспышки получателя (через var(--agent)).
+    FLOW.nodes.forEach(n => nodeEls[n.id].setAttribute('data-lane', n.lane));
+
+    let scen = FLOW.scenarios[0];
+    let scenNodes = scen.nodes;
+    let cur = -1;        // индекс шага сценария; -1 пока не начат
+    let anim = null;     // {from, to, t, dur, manual}: движение конверта по связи
+    let still = null;    // {from, to}: при «уменьшить движение» конверт стоит у узла to после ручного перехода
+    let dwellLeft = 0;   // сколько ещё стоять на шаге, мс
+    let playing = false;
+    let rafId = 0;
+    let lastTs = 0;
+    let recvEl = null;   // узел, на котором сейчас класс is-received
+    let recvTimer = 0;
+    let tagLabel = null; // слово возврата, под которое измерена подложка
+
+    // Полоса хода: одно деление на шаг сценария, дорожка шага - в data-lane делении.
+    function buildTrack() {
+      trackEl.textContent = '';
+      scenNodes.forEach(id => {
+        const d = document.createElement('span');
+        d.className = 'player-tick';
+        d.setAttribute('data-lane', nodeById[id].lane);
+        trackEl.appendChild(d);
+      });
+    }
+
+    // Точка узла для конверта: верхний край по центру, текст внутри не закрывает.
+    function anchorOf(id) {
+      const p = pos[id];
+      return { x: p.x + NODE_W / 2, y: p.y };
+    }
+
+    // Ломаная перехода: от узла a через путь связи к узлу b (путь разворачивается, если связь идёт назад).
+    function routeFor(a, b) {
+      const A = anchorOf(a);
+      const B = anchorOf(b);
+      const hit = edgeBetween(a, b);
+      if (!hit) return [A, B];
+      const mid = hit.rev ? hit.el.xy.slice().reverse() : hit.el.xy;
+      return [A, ...mid, B];
+    }
+
+    function pointOn(pts, f) {
+      const lens = [];
+      let total = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+        lens.push(d);
+        total += d;
+      }
+      let want = f * total;
+      for (let i = 1; i < pts.length; i++) {
+        const d = lens[i - 1];
+        if (want <= d || i === pts.length - 1) {
+          const k = d === 0 ? 0 : Math.min(want / d, 1);
+          return {
+            x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * k,
+            y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * k
+          };
+        }
+        want -= d;
+      }
+      return pts[pts.length - 1];
+    }
+
+    // Прокрутка .flow-scroll держит конверт в видимой части, не заходя под колонку дорожек.
+    // На широком экране справа оставляется запас по ширине плавающей панели, чтобы конверт не оказался под ней.
+    // Вызывается только когда конверт показан: у скрытого нулевой прямоугольник и прокрутка уехала бы.
+    function keepVisible() {
+      const dr = envBody.getBoundingClientRect();
+      // Слово возврата выступает вправо от корпуса: правый край берётся по подложке слова, если она шире.
+      const er = Math.max(dr.right, tagG.getBoundingClientRect().right);
+      const sr = scrollEl.getBoundingClientRect();
+      const left = Math.max(sr.left, labelsEl.getBoundingClientRect().right) + 8;
+      const floatW = wideQuery.matches ? floatEl.getBoundingClientRect().width : 0;
+      const right = sr.right - 8 - floatW;
+      const top = sr.top + 8;
+      const bottom = sr.bottom - 8;
+      if (dr.left < left) scrollEl.scrollLeft -= left - dr.left;
+      else if (er > right) scrollEl.scrollLeft += er - right;
+      if (dr.top < top) scrollEl.scrollTop -= top - dr.top;
+      else if (dr.bottom > bottom) scrollEl.scrollTop += dr.bottom - bottom;
+    }
+
+    // Слово возврата: подложка по ширине текста, меряется только когда конверт показан.
+    function setTag(text) {
+      if (text === tagLabel) return;
+      tagLabel = text;
+      tagText.textContent = text;
+      tagBg.setAttribute('width', Math.ceil(tagText.getComputedTextLength()) + 12);
+    }
+
+    function edgeLabel(a, b) {
+      const hit = edgeBetween(a, b);
+      return hit ? hit.el.e.label : '';
+    }
+
+    // Вспышка получателя: класс снимается сам через RECEIVE_MS. Повтор: класс снимается и ставится заново, анимация стартует снова.
+    function clearReceived() {
+      clearTimeout(recvTimer);
+      recvTimer = 0;
+      if (recvEl) recvEl.classList.remove('is-received');
+      recvEl = null;
+    }
+
+    function markReceived(id) {
+      clearReceived();
+      const g = nodeEls[id];
+      void g.getBoundingClientRect(); // сброс стиля, чтобы анимация стартовала заново
+      g.classList.add('is-received');
+      recvEl = g;
+      recvTimer = setTimeout(clearReceived, RECEIVE_MS);
+    }
+
+    // Конверт в переходе едет по маршруту; при «уменьшить движение» стоит у узла после ручного перехода; иначе скрыт.
+    function renderMarker() {
+      let p = null;
+      let from = -1;
+      let to = -1;
+      if (anim) {
+        const f = Math.min(anim.t / anim.dur, 1);
+        const e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2;
+        p = pointOn(routeFor(scenNodes[anim.from], scenNodes[anim.to]), e);
+        from = anim.from;
+        to = anim.to;
+      } else if (still) {
+        p = anchorOf(scenNodes[still.to]);
+        from = still.from;
+        to = still.to;
+      }
+      if (!p) {
+        env.style.display = 'none';
+        return;
+      }
+      env.style.display = '';
+      env.setAttribute('data-lane', nodeById[scenNodes[from]].lane);
+      setTag(edgeLabel(scenNodes[from], scenNodes[to]));
+      env.setAttribute('transform', 'translate(' + (p.x - 12).toFixed(1) + ' ' + (p.y - 8).toFixed(1) + ')');
+      keepVisible();
+    }
+
+    // Пройденные: шаги до текущего включительно по порядку; связи между ними тоже.
+    function paintProgress() {
+      FLOW.nodes.forEach(n => nodeEls[n.id].classList.remove('is-passed'));
+      edgeEls.forEach(x => x.path.classList.remove('is-passed'));
+      if (cur <= 0) return;
+      for (let k = 0; k < cur; k++) {
+        nodeEls[scenNodes[k]].classList.add('is-passed');
+        const hit = edgeBetween(scenNodes[k], scenNodes[k + 1]);
+        if (hit) hit.el.path.classList.add('is-passed');
+      }
+    }
+
+    function paintTrack() {
+      Array.from(trackEl.children).forEach((d, i) => {
+        d.classList.toggle('is-done', i < cur);
+        d.classList.toggle('is-current', i === cur);
+      });
+    }
+
+    function describe() {
+      if (cur < 0) return 'Сценарий «' + scen.name + '» не начат: нажмите «Играть» или «Шаг».';
+      const n = nodeById[scenNodes[cur]];
+      const head = 'Шаг ' + (cur + 1) + ' из ' + scenNodes.length + ': ' + n.name + '. Дорожка: ' + laneName[n.lane] + '.';
+      return cur === scenNodes.length - 1 ? 'Сценарий завершён. ' + head : head;
+    }
+
+    function updateControls() {
+      const ended = cur === scenNodes.length - 1;
+      const reduce = reduced();
+      btnPlay.querySelector('.player-label').textContent = ended ? 'Сначала' : 'Играть';
+      btnPlay.querySelector('.player-ico').innerHTML = ended ? RESET_GLYPH : PLAY_GLYPH;
+      btnPlay.disabled = ended ? false : (playing || reduce);
+      btnPause.disabled = !playing;
+      btnBack.disabled = playing || cur <= 0;
+      btnStep.disabled = playing || ended;
+      noteEl.hidden = !reduce;
+    }
+
+    // Состояние для задачи 07: занято, пока идёт проигрывание или анимированный ручной переход.
+    function isBusy() {
+      return playing || !!(anim && anim.manual);
+    }
+
+    // Событие уходит только при смене busy: первая отправка - при инициализации.
+    let lastBusy = null;
+    function emitBusy() {
+      const busy = isBusy();
+      if (busy === lastBusy) return;
+      lastBusy = busy;
+      document.dispatchEvent(new CustomEvent('flow-player-state', { detail: { busy } }));
+    }
+
+    function sync() {
+      renderMarker();
+      paintTrack();
+      statusEl.textContent = describe();
+      updateControls();
+      emitBusy();
+    }
+
+    // Переход на шаг index. Движение по связи только при разрешённом движении и уже стоящем конверте.
+    // При «уменьшить движение» переход мгновенный: конверт стоит у узла, получатель вспыхивает сразу.
+    function show(index, manual) {
+      const from = cur;
+      cur = index;
+      dwellLeft = DWELL_MS;
+      anim = null;
+      still = null;
+      if (from >= 0) {
+        if (reduced()) {
+          still = { from, to: index };
+          markReceived(scenNodes[index]);
+        } else {
+          anim = { from, to: index, t: 0, dur: MOVE_MS, manual };
+        }
+      }
+      select(scenNodes[index]);
+      sync();
+    }
+
+    function tick(ts) {
+      const dt = Math.min(Math.max(ts - lastTs, 0), 100);
+      lastTs = ts;
+      if (anim && (playing || anim.manual)) {
+        anim.t += dt;
+        if (anim.t >= anim.dur) {
+          const arrived = anim.to;
+          anim = null;
+          markReceived(scenNodes[arrived]);
+          if (playing) {
+            if (cur >= scenNodes.length - 1) stopPlay();
+            else dwellLeft = DWELL_MS;
+          } else {
+            emitBusy();
+          }
+        }
+      } else if (playing) {
+        dwellLeft -= dt;
+        if (dwellLeft <= 0) show(cur + 1, false);
+      }
+      renderMarker();
+      if (playing || (anim && anim.manual)) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        rafId = 0;
+      }
+    }
+
+    function startLoop() {
+      if (rafId) return;
+      lastTs = performance.now();
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function play() {
+      if (reduced() || cur >= scenNodes.length - 1) return;
+      if (cur < 0) {
+        show(0, false);
+        dwellLeft = DWELL_MS;
+      }
+      playing = true;
+      sync();
+      startLoop();
+    }
+
+    function stopPlay() {
+      playing = false;
+      sync();
+    }
+
+    function pause() {
+      if (!playing) return;
+      stopPlay();
+    }
+
+    // Шаг и Назад работают только при остановленном проигрывании.
+    function step(dir) {
+      if (playing) return;
+      const target = cur < 0 ? (dir > 0 ? 0 : -1) : cur + dir;
+      if (target < 0 || target >= scenNodes.length) return;
+      show(target, true);
+      startLoop();
+    }
+
+    function reset() {
+      playing = false;
+      anim = null;
+      still = null;
+      clearReceived();
+      dwellLeft = DWELL_MS;
+      cur = 0;
+      select(scenNodes[0]);
+      sync();
+    }
+
+    // Клик или Enter по узлу во время проигрывания ставит паузу и выбирает узел.
+    // Выбор пользователем разворачивает свёрнутую панель; ход плеера этого не делает.
+    function pickByUser(id) {
+      if (playing) pause();
+      if (!panelOpen) setPanelOpen(true, null);
+      select(id);
+    }
+
+    btnPlay.addEventListener('click', () => {
+      if (cur === scenNodes.length - 1) reset();
+      else play();
+    });
+    btnPause.addEventListener('click', pause);
+    btnBack.addEventListener('click', () => step(-1));
+    btnStep.addEventListener('click', () => step(1));
+    btnReset.addEventListener('click', reset);
+
+    // Выбор сценария ставит конверт на его первый узел и останавливает проигрывание.
+    scenarioEl.addEventListener('change', () => {
+      scen = FLOW.scenarios.find(s => s.id === scenarioEl.value) || FLOW.scenarios[0];
+      scenNodes = scen.nodes;
+      buildTrack();
+      reset();
+    });
+
+    motionQuery.addEventListener('change', () => {
+      if (reduced()) {
+        playing = false;
+        anim = null;
+      }
+      still = null;
+      clearReceived();
+      sync();
+    });
+
+    window.FlowRoutes = { routeFor, pointOn, isBusy };
+
+    buildTrack();
+    paint();
+    sync();
+    // end region
+
+    // region: view-ambient
+    // Тихий сигнал в покое: раз в 6-10 с одна точка без слова едет по случайной связи обычного пути (main)
+    // от узла-отправителя к получателю, цвет отправителя. Одновременно не больше одного сигнала.
+    // Маршрут и состояние плеера берутся только из window.FlowRoutes и события flow-player-state.
+    function initAmbient() {
+      const routes = window.FlowRoutes;
+      if (!routes || typeof routes.routeFor !== 'function' || typeof routes.pointOn !== 'function' || typeof routes.isBusy !== 'function') {
+        console.error('Тихий сигнал: нет window.FlowRoutes, сигнал не запускается');
+        return;
+      }
+      const ambientMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const mainEdges = FLOW.edges.filter(e => e.main);
+      const GAP_MIN = 6000;     // пауза между стартами: 6000-10000 мс
+      const GAP_SPAN = 4000;
+      const DUR_MIN = 1000;    // проход: 1000-1500 мс
+      const DUR_SPAN = 500;
+      const PEAK = 0.6;        // прозрачность не выше 0,6
+
+      // Один элемент на весь сигнал. Стоит под узлами (вставка перед слоем узлов), не интерактивен.
+      const sig = svgEl('g', { class: 'ambient-signal', 'aria-hidden': 'true' });
+      sig.style.display = 'none';
+      const dot = svgEl('circle', { class: 'ambient-dot', r: 3, cx: 0, cy: 0 }, sig);
+      svg.insertBefore(sig, nodesG);
+
+      let busy = routes.isBusy();
+      let timer = 0;
+      let raf = 0;
+
+      function canRun() {
+        return !busy && !document.hidden && !ambientMotion.matches;
+      }
+
+      function clearTimer() {
+        clearTimeout(timer);
+        timer = 0;
+      }
+
+      function stopSignal() {
+        cancelAnimationFrame(raf);
+        raf = 0;
+        sig.style.display = 'none';
+      }
+
+      function arm() {
+        clearTimer();
+        if (!canRun()) return;
+        timer = setTimeout(fire, GAP_MIN + Math.random() * GAP_SPAN);
+      }
+
+      function fire() {
+        timer = 0;
+        if (!canRun() || !mainEdges.length) return;
+        const e = mainEdges[Math.floor(Math.random() * mainEdges.length)];
+        const pts = routes.routeFor(e.from, e.to);
+        const dur = DUR_MIN + Math.random() * DUR_SPAN;
+        const t0 = performance.now();
+        sig.setAttribute('data-lane', nodeById[e.from].lane);
+        sig.style.display = '';
+        arm(); // следующий старт не раньше чем через 6 с от этого
+
+        function frame(ts) {
+          const f = Math.min((ts - t0) / dur, 1);
+          const p = routes.pointOn(pts, f);
+          sig.setAttribute('transform', 'translate(' + p.x.toFixed(1) + ' ' + p.y.toFixed(1) + ')');
+          dot.style.opacity = (PEAK * Math.sin(Math.PI * f)).toFixed(3);
+          if (f < 1) {
+            raf = requestAnimationFrame(frame);
+          } else {
+            raf = 0;
+            sig.style.display = 'none';
+          }
+        }
+        raf = requestAnimationFrame(frame);
+      }
+
+      // Состояние плеера: первое событие ушло до этой функции, поэтому стартовое значение берётся из isBusy().
+      document.addEventListener('flow-player-state', e => {
+        busy = !!(e.detail && e.detail.busy);
+        if (busy) {
+          clearTimer();
+          stopSignal();
+        } else {
+          arm();
+        }
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          clearTimer();
+          stopSignal();
+        } else {
+          arm();
+        }
+      });
+
+      ambientMotion.addEventListener('change', () => {
+        clearTimer();
+        stopSignal();
+        arm();
+      });
+
+      // Сброс «Сначала», «Играть» с конца сценария и смена сценария не меняют busy (он уже false),
+      // поэтому события нет. Таймер перезапускается здесь: следующий старт не раньше чем через 6 с.
+      function restartGap() {
+        clearTimer();
+        stopSignal();
+        arm();
+      }
+      const resetControls = ['btn-reset', 'btn-play'];
+      for (const id of resetControls) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', restartGap);
+      }
+      const scenarioSel = document.getElementById('scenario');
+      if (scenarioSel) scenarioSel.addEventListener('change', restartGap);
+
+      arm();
+    }
+    initAmbient();
+    // end region
+
+  })();
+</script>
+<!-- end region -->
+
+</body>
+</html>
